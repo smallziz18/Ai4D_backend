@@ -4,6 +4,8 @@ import logging
 from fastapi.requests import Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import JSONResponse
+import os
 
 logger = logging.getLogger('uvicorn.access')
 logger.disabled = True
@@ -23,25 +25,41 @@ formatter = logging.Formatter(
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
+# Contrôle si on veut ré-émettre les exceptions pour voir la trace brute
+PAUSE_ERROR_HANDLING = os.getenv("PAUSE_ERROR_HANDLING", "false").lower() in ("1", "true", "yes")
+
 
 def register_middlewares(app: FastAPI):
     @app.middleware("http")
     async def custom_logging(request: Request, call_next):
         start_time = time.time()
 
-        # Exécution de la requête
-        response = await call_next(request)
+        try:
+            # Exécution de la requête
+            response = await call_next(request)
+        except Exception as exc:
+            # Log de l'exception avec traceback
+            logger.exception(f"Unhandled exception for {request.method} {request.url.path}: {exc}")
+
+            # Si on veut voir les erreurs brutes dans la console (utile en dev),
+            # on ré-émet l'exception pour que Uvicorn/FastAPI affiche la stack complète.
+            if PAUSE_ERROR_HANDLING:
+                raise
+
+            # Sinon on renvoie une réponse 500 générique (comportement sécurisé pour prod)
+            return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
 
         # Calcul du temps
         duration = round(time.time() - start_time, 3)
 
         # IP du client
         client_host = request.client.host if request.client else "unknown"
+        client_port = request.client.port if request.client else "unknown"
 
         # Log final formaté
         logger.info(
             f"{request.method} {request.url.path} "
-            f"→ {response.status_code} | {duration}s | from {client_host} on port {request.client.port}"
+            f"→ {response.status_code} | {duration}s | from {client_host} on port {client_port}"
         )
 
         return response

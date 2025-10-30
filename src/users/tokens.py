@@ -2,12 +2,12 @@
 Gestion des tokens de vérification et reset de mot de passe
 """
 from datetime import datetime, timedelta
-from typing import Optional
-from uuid import uuid4
+from typing import Optional, Union
+from uuid import UUID
 import secrets
 
 from sqlmodel import SQLModel, Field, select
-from sqlalchemy import Column
+from sqlalchemy import Column, ForeignKey
 from sqlalchemy.ext.asyncio import AsyncSession
 import sqlalchemy.dialects.postgresql as pg
 
@@ -17,7 +17,8 @@ class VerificationToken(SQLModel, table=True):
     __tablename__ = "verification_token"
 
     id: int = Field(primary_key=True)
-    user_id: str = Field(foreign_key="utilisateur.id", index=True)
+    # Use UUID type so SQLAlchemy/asyncpg bind UUID parameters (avoid uuid=varchar operator error)
+    user_id: UUID = Field(sa_column=Column(pg.UUID(as_uuid=True), ForeignKey("utilisateur.id")))
     token: str = Field(unique=True, index=True)
     token_type: str = Field(default="email_verification")  # ou "password_reset"
 
@@ -45,7 +46,7 @@ class TokenService:
 
     @staticmethod
     async def create_verification_token(
-        user_id: str,
+        user_id: Union[str, UUID],
         session: AsyncSession,
         token_type: str = "email_verification",
         expiry_hours: int = 24
@@ -54,19 +55,31 @@ class TokenService:
         Crée un token de vérification
 
         Args:
-            user_id: ID de l'utilisateur
+            user_id: ID de l'utilisateur (str UUID or UUID)
             session: Session de base de données
             token_type: Type de token (email_verification ou password_reset)
             expiry_hours: Durée de validité en heures (défaut 24h)
         """
+        # Ensure user_id is a UUID instance
+        if isinstance(user_id, str):
+            try:
+                user_uuid = UUID(user_id)
+            except Exception:
+                # If invalid UUID string, re-raise with clearer message
+                raise ValueError("user_id must be a valid UUID string")
+        elif isinstance(user_id, UUID):
+            user_uuid = user_id
+        else:
+            raise ValueError("user_id must be a UUID or UUID string")
+
         # Invalider les tokens précédents non utilisés
-        await TokenService.invalidate_user_tokens(user_id, token_type, session)
+        await TokenService.invalidate_user_tokens(user_uuid, token_type, session)
 
         token = TokenService.generate_token()
         expires_at = datetime.now() + timedelta(hours=expiry_hours)
 
         verification_token = VerificationToken(
-            user_id=user_id,
+            user_id=user_uuid,
             token=token,
             token_type=token_type,
             created_at=datetime.now(),
@@ -116,13 +129,24 @@ class TokenService:
 
     @staticmethod
     async def invalidate_user_tokens(
-        user_id: str,
+        user_id: Union[str, UUID],
         token_type: str,
         session: AsyncSession
     ):
         """Invalide tous les tokens non utilisés d'un utilisateur"""
+        # Ensure user_id is UUID
+        if isinstance(user_id, str):
+            try:
+                user_uuid = UUID(user_id)
+            except Exception:
+                raise ValueError("user_id must be a valid UUID string")
+        elif isinstance(user_id, UUID):
+            user_uuid = user_id
+        else:
+            raise ValueError("user_id must be a UUID or UUID string")
+
         stmt = select(VerificationToken).where(
-            VerificationToken.user_id == user_id,
+            VerificationToken.user_id == user_uuid,
             VerificationToken.token_type == token_type,
             VerificationToken.is_used == False
         )
@@ -149,4 +173,3 @@ class TokenService:
 
         await session.commit()
         return len(expired_tokens)
-
