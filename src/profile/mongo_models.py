@@ -51,6 +51,12 @@ class ProfilMongoDB(BaseModel):
     perfect_quiz_count: int = Field(default=0, ge=0)  # Nombre de quiz parfaits
     total_xp_earned: int = Field(default=0, ge=0)  # XP total gagné
 
+    # Questionnaire initial de profilage
+    questionnaire_initial_complete: bool = Field(default=False)  # Si le questionnaire initial a été fait
+    questionnaire_initial_date: Optional[datetime] = None  # Date du questionnaire initial
+    questionnaire_reponses: List[Dict[str, Any]] = Field(default_factory=list)  # Réponses détaillées
+    analyse_questions_ouvertes: Optional[Dict[str, Any]] = Field(default_factory=dict)  # Analyse des questions ouvertes
+
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
 

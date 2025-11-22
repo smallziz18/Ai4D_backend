@@ -27,6 +27,20 @@ class UtilisateurBase(BaseModel):
 
 # -------- SCHÉMAS DE CRÉATION --------
 
+class UtilisateurCreateBase(BaseModel):
+    """
+    Schéma de création de base pour le signup.
+    Ne contient QUE les données minimales de l'utilisateur.
+    Le profil détaillé (Etudiant/Professeur) sera créé APRÈS le questionnaire.
+    """
+    nom: str
+    prenom: str
+    username: str
+    email: EmailStr
+    motDePasseHash: str
+    status: StatutUtilisateur
+
+
 class ProfesseurCreate(UtilisateurBase):
     status: StatutUtilisateur = StatutUtilisateur.PROFESSEUR
     niveau_experience: int = Field(ge=0, le=20)

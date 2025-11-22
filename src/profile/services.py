@@ -514,6 +514,134 @@ class ProfileService:
             "recommendations": recommendations,
         }
 
+    async def save_initial_questionnaire(
+        self,
+        user_id: UUID,
+        questionnaire_data: dict,
+        analyse_llm: Optional[Dict[str, Any]] = None
+    ) -> ProfilMongoDB:
+        """
+        Sauvegarde le questionnaire initial de profilage dans MongoDB.
+
+        Ce questionnaire est fait UNE SEULE FOIS pour jauger le niveau réel de l'utilisateur,
+        surtout via les questions ouvertes qui révèlent la compréhension profonde.
+
+        Args:
+            user_id: UUID de l'utilisateur
+            questionnaire_data: Données du questionnaire avec toutes les réponses
+            analyse_llm: Analyse optionnelle du LLM sur les questions ouvertes
+
+        Returns:
+            ProfilMongoDB mis à jour
+        """
+        profile = await self.get_profile_by_user_id(user_id)
+        if not profile:
+            raise ValueError("Profile not found")
+
+        # Vérifier si le questionnaire a déjà été fait
+        if profile.questionnaire_initial_complete:
+            raise ValueError("Le questionnaire initial a déjà été complété. Il ne peut être fait qu'une seule fois.")
+
+        now = datetime.now()
+
+        # Extraire et structurer les réponses
+        questions = questionnaire_data.get("questions_data", []) or questionnaire_data.get("questions", [])
+
+        # Séparer les questions ouvertes des autres
+        questions_ouvertes = []
+        questions_fermees = []
+
+        for q in questions:
+            question_type = q.get("type", "").lower()
+            reponse_structure = {
+                "question": q.get("question", ""),
+                "type": question_type,
+                "reponse_utilisateur": q.get("user_answer", ""),
+                "timestamp": now.isoformat(),
+            }
+
+            if question_type in ["ouverte", "open", "text", "essay"]:
+                # Question ouverte - très importante pour l'évaluation
+                reponse_structure["poids_evaluation"] = "élevé"  # Plus important pour jauger le niveau
+                reponse_structure["correction"] = q.get("correction", "")
+                questions_ouvertes.append(reponse_structure)
+            else:
+                # Question fermée (QCM, Vrai/Faux)
+                reponse_structure["poids_evaluation"] = "standard"
+                reponse_structure["est_correct"] = q.get("is_correct", False)
+                reponse_structure["correction"] = q.get("correction", "")
+                questions_fermees.append(reponse_structure)
+
+        # Analyse sémantique des questions ouvertes
+        analyse_questions_ouvertes = {
+            "nombre_questions_ouvertes": len(questions_ouvertes),
+            "questions": questions_ouvertes,
+            "analyse_llm": analyse_llm or {},
+            "score_global": questionnaire_data.get("score", 0),
+            "evaluation_detaillee": {
+                "comprehension_profonde": analyse_llm.get("comprehension_profonde", "non_evaluee") if analyse_llm else "non_evaluee",
+                "capacite_explication": analyse_llm.get("capacite_explication", "non_evaluee") if analyse_llm else "non_evaluee",
+                "niveau_reel_estime": analyse_llm.get("niveau_reel", "non_determine") if analyse_llm else "non_determine",
+                "commentaires": analyse_llm.get("commentaires", "") if analyse_llm else "",
+            },
+            "date_analyse": now.isoformat(),
+        }
+
+        # Mettre à jour le profil
+        update_fields = {
+            "questionnaire_initial_complete": True,
+            "questionnaire_initial_date": now,
+            "questionnaire_reponses": questions_ouvertes + questions_fermees,  # Toutes les réponses
+            "analyse_questions_ouvertes": analyse_questions_ouvertes,
+            "updated_at": now,
+        }
+
+        # Mettre à jour aussi les compétences et objectifs si fournis
+        if analyse_llm:
+            competences_identifiees = analyse_llm.get("competences", [])
+            if competences_identifiees:
+                update_fields["competences"] = list(set(profile.competences + competences_identifiees))
+
+            objectifs_recommandes = analyse_llm.get("objectifs", "")
+            if objectifs_recommandes:
+                update_fields["objectifs"] = objectifs_recommandes
+
+            motivation = analyse_llm.get("motivation", "")
+            if motivation:
+                update_fields["motivation"] = motivation
+
+            # Ajouter les recommandations du LLM
+            recommandations = analyse_llm.get("recommandations", [])
+            if recommandations:
+                update_fields["recommandations"] = recommandations
+
+        # Appliquer la mise à jour
+        self.collection.update_one(
+            {"utilisateur_id": str(user_id)},
+            {"$set": update_fields}
+        )
+
+        # Logger l'activité
+        await self.log_activity(
+            user_id,
+            "questionnaire_initial_complete",
+            {
+                "total_questions": len(questions),
+                "questions_ouvertes": len(questions_ouvertes),
+                "questions_fermees": len(questions_fermees),
+                "score": questionnaire_data.get("score", 0),
+                "analyse_disponible": analyse_llm is not None,
+            }
+        )
+
+        # Récupérer et retourner le profil mis à jour
+        updated_profile = await self.get_profile_by_user_id(user_id)
+        return updated_profile
+
+    async def has_profile(self, user_id: UUID) -> bool:
+        """Retourne True si un profil existe pour cet utilisateur, sinon False (rapide)."""
+        return self.collection.find_one({"utilisateur_id": str(user_id)}, {"_id": 1}) is not None
+
 
 # Instance globale du service
 profile_service = ProfileService()

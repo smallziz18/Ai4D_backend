@@ -1,5 +1,5 @@
 from datetime import timedelta, datetime, timezone
-from typing import Union, List
+from typing import List
 from fastapi import APIRouter, status, Depends, HTTPException,BackgroundTasks
 from sqlmodel.ext.asyncio.session import AsyncSession
 from fastapi.responses import JSONResponse
@@ -14,15 +14,20 @@ from src.db.redis import (
     add_jti_to_blocklist
 )
 from .models import StatutUtilisateur
-from .utils import create_access_token, decode_url_safe_token, validate_email_token_and_get_user
-from src.users.schema import UtilisateurRead, ProfesseurCreate, EtudiantCreate, UserLogin, EmailModel, \
-    PasswordResetModel, PasswordResetConfirm
+from .utils import create_access_token
+from src.users.schema import (
+    UtilisateurRead,
+    UtilisateurCreateBase,
+    UserLogin,
+    EmailModel,
+    PasswordResetModel,
+    PasswordResetConfirm
+)
 from src.users.services import UserService
-from src.users.utils import verify_password_hash ,create_url_safe_token,generate_password_hash
+from src.users.utils import verify_password_hash ,generate_password_hash
 from src.users.dependencies import AccessTokenBearer
 from .dependencies import RefreshTokenBearer
 from .dependencies import get_current_user, RoleChecker
-from src.mail import mail,create_message
 from ..celery_tasks import send_email
 from ..error import (
     InvalidToken,
@@ -186,11 +191,24 @@ async def get_all_users(
 @user_router.post("/signup", status_code=status.HTTP_201_CREATED)
 async def create_user(
         bgtask: BackgroundTasks,
-        data: Union[ProfesseurCreate, EtudiantCreate],
+        data: UtilisateurCreateBase,
         session: AsyncSession = Depends(get_session),
 ):
     """
     Inscription d'un nouvel utilisateur avec envoi d'email de vérification.
+
+    ⚠️ IMPORTANT: Cette route crée UNIQUEMENT l'utilisateur de base (compte).
+    Le profil détaillé (Etudiant/Professeur) et le profil MongoDB seront créés
+    APRÈS le questionnaire initial via POST /api/profile/v1/analyze_quiz.
+
+    Flux d'inscription:
+    1. POST /signup → Crée l'utilisateur de base + envoi email de vérification
+    2. GET /verify/{token} → Vérifie l'email
+    3. POST /login → Connexion
+    4. Frontend vérifie hasProfile() → false → Redirige vers /questionnaire
+    5. POST /analyze_quiz → Crée le profil MongoDB + profil Etudiant/Professeur
+    6. hasProfile() → true → Dashboard accessible
+
     Le token de vérification expire après 24 heures.
     """
     try:
@@ -210,8 +228,11 @@ async def create_user(
         if existing_user:
             raise UserAlreadyExists()
 
-        # Modifier l'email dans data pour utiliser l'email normalisé
-        data.email = normalized_email
+        # Revalider via le schéma pour conserver EmailStr
+        data = UtilisateurCreateBase(**{**data.model_dump(), "email": normalized_email})
+
+        # ✅ CHANGEMENT: create_user crée maintenant UNIQUEMENT l'utilisateur de base
+        # Le profil Etudiant/Professeur sera créé après le questionnaire
         user = await user_service.create_user(session, data)
         user_data = UtilisateurRead.model_validate(user, from_attributes=True)
 
@@ -678,19 +699,3 @@ async def resend_verification_email(
             },
             status_code=status.HTTP_200_OK
         )
-        return JSONResponse(
-            content={"message": "Password reset successful"},
-            status_code=status.HTTP_200_OK
-        )
-
-    except HTTPException:
-        raise
-    except UserNotFound:
-        raise
-    except Exception as e:
-        logger.error(f"Error during Resetting password: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error during password reset "
-        )
-

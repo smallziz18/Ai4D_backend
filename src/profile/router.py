@@ -74,7 +74,15 @@ async def create_profile(
 async def get_my_profile(
         current_user: Utilisateur = Depends(get_current_user)
 ):
-    """Récupérer le profil de l'utilisateur connecté ou le créer s'il n'existe pas"""
+    """
+    Récupérer le profil de l'utilisateur connecté.
+
+    ⚠️ IMPORTANT: Cette route ne crée PLUS automatiquement le profil.
+    Le profil est créé UNIQUEMENT après le questionnaire initial.
+
+    Si le profil n'existe pas → 404
+    Le frontend doit rediriger vers /questionnaire dans ce cas.
+    """
 
     # Tentative de récupération depuis le cache
     try:
@@ -89,22 +97,10 @@ async def get_my_profile(
     profile = await profile_service.get_profile_by_user_id(current_user.id)
 
     if not profile:
-        # Créer un nouveau profil avec les valeurs par défaut
-        profile_data = ProfilCreate(
-            utilisateur_id=current_user.id,
-            niveau=1,
-            xp=0,
-            badges=[],
-            competences=[],
-            energie=5
-        )
-        try:
-            profile = await profile_service.create_profile(profile_data)
-        except ValueError as e:
-            # En cas de création simultanée, on réessaie de récupérer
-            profile = await profile_service.get_profile_by_user_id(current_user.id)
-            if not profile:
-                raise ProfileNotFound(str(e))
+        # ✅ CHANGEMENT: Ne plus créer automatiquement le profil
+        # Le profil sera créé après le questionnaire initial
+        logger.info(f"Profile not found for user {current_user.id} - questionnaire required")
+        raise ProfileNotFound()
 
     # Mettre en cache le profil récupéré
     try:
@@ -114,6 +110,13 @@ async def get_my_profile(
         logger.warning(f"Redis caching failed after profile retrieval: {e}")
 
     return profile
+
+
+# Alias pour /me qui est souvent utilisé par les frontends
+@router.get("/me", response_model=ProfilResponse)
+async def get_profile_me(current_user: Utilisateur = Depends(get_current_user)):
+    """Alias de GET / pour récupérer le profil de l'utilisateur connecté"""
+    return await get_my_profile(current_user)
 
 
 @router.put("/", response_model=ProfilResponse)
@@ -215,6 +218,50 @@ async def get_profile_stats(
         logger.warning(f"Redis caching failed for profile stats: {e}")
 
     return stats
+
+
+@router.get("/recommendations")
+async def get_recommendations(current_user: Utilisateur = Depends(get_current_user)):
+    """
+    Récupère les recommandations personnalisées pour l'utilisateur.
+
+    Les recommandations sont basées sur :
+    - L'analyse du questionnaire initial (questions ouvertes)
+    - Les performances aux quiz
+    - Les forces et faiblesses identifiées
+    """
+    logger.info(f"[RECOMMENDATIONS] Fetching recommendations for user {current_user.id}")
+
+    profile = await profile_service.get_profile_by_user_id(current_user.id)
+
+    if not profile:
+        logger.error(f"[RECOMMENDATIONS] Profile not found for user {current_user.id}")
+        raise ProfileNotFound()
+
+    logger.info(f"[RECOMMENDATIONS] Profile found: questionnaire_complete={profile.questionnaire_initial_complete}, recommendations_count={len(profile.recommandations or [])}")
+
+    recommendations = profile.recommandations or []
+
+    # Enrichir avec des informations contextuelles
+    result = {
+        "recommendations": recommendations,
+        "total": len(recommendations),
+        "questionnaire_complete": profile.questionnaire_initial_complete,
+        "niveau": profile.niveau,
+        "competences": profile.competences,
+        "objectifs": profile.objectifs,
+    }
+
+    # Si le questionnaire initial est fait, ajouter l'analyse des questions ouvertes
+    if profile.questionnaire_initial_complete and profile.analyse_questions_ouvertes:
+        result["analyse_questions_ouvertes"] = {
+            "niveau_reel": profile.analyse_questions_ouvertes.get("evaluation_detaillee", {}).get("niveau_reel_estime", "non_determine"),
+            "comprehension_profonde": profile.analyse_questions_ouvertes.get("evaluation_detaillee", {}).get("comprehension_profonde", "non_evaluee"),
+            "capacite_explication": profile.analyse_questions_ouvertes.get("evaluation_detaillee", {}).get("capacite_explication", "non_evaluee"),
+        }
+
+    logger.info(f"[RECOMMENDATIONS] Returning {len(recommendations)} recommendations")
+    return result
 
 
 @router.get("/leaderboard")
@@ -467,12 +514,41 @@ async def analyze_quiz(
     evaluation: dict = Body(..., description="Résultats détaillés du quiz"),
     current_user: Utilisateur = Depends(get_current_user)
 ):
-    """Lance l'analyse d'un quiz complété (authentification requise)"""
+    """
+    Lance l'analyse d'un quiz complété (authentification requise).
+
+    Détecte automatiquement si c'est le questionnaire initial de profilage :
+    - Si aucun profil n'existe encore → initial = True
+    - Si le profil existe mais questionnaire non complété → initial = True
+    - Sinon → quiz normal
+    """
     try:
+        # Vérifier si le profil existe et/ou si le questionnaire initial a déjà été fait
+        profile = await profile_service.get_profile_by_user_id(current_user.id)
+        is_initial = False
+
+        if not profile:
+            # Aucun profil → c'est forcément le questionnaire initial
+            is_initial = True
+            logger.info(f"Detected initial questionnaire (no profile yet) for user {current_user.id}")
+        elif not profile.questionnaire_initial_complete:
+            # Profil existe mais questionnaire pas encore complété
+            is_initial = True
+            logger.info(f"Detected initial questionnaire (profile exists but not completed) for user {current_user.id}")
+
         u = UtilisateurRead.model_validate(current_user, from_attributes=True)
         user_dict = u.model_dump()
-        task = profile_analysis_task.delay(user_dict, evaluation)
-        return {"task_id": task.id}
+
+        # Lancer l'analyse avec le bon flag
+        task = profile_analysis_task.delay(user_dict, evaluation, is_initial)
+
+        message = "Questionnaire initial en cours d'analyse" if is_initial else "Quiz en cours d'analyse"
+
+        return {
+            "task_id": task.id,
+            "is_initial_questionnaire": is_initial,
+            "message": message
+        }
     except Exception as e:
         logger.error(f"Error starting profile analysis: {e}")
         raise HTTPException(status_code=500, detail="Erreur lors de l'analyse du quiz")
@@ -712,3 +788,15 @@ async def get_gamification_dashboard(current_user: Utilisateur = Depends(get_cur
 
     return display_data
 
+
+@router.get("/has-profile")
+async def has_profile_endpoint(current_user: Utilisateur = Depends(get_current_user)):
+    """Retourne un booléen indiquant si le profil MongoDB existe et le statut du questionnaire initial."""
+    exists = await profile_service.has_profile(current_user.id)
+    if not exists:
+        return {"has_profile": False, "questionnaire_initial_complete": False}
+    profil = await profile_service.get_profile_by_user_id(current_user.id)
+    return {
+        "has_profile": True,
+        "questionnaire_initial_complete": bool(getattr(profil, 'questionnaire_initial_complete', False))
+    }
