@@ -56,6 +56,15 @@ uvloop==0.21.0
 watchfiles==1.1.0
 websockets==15.0.1
 wheel==0.45.1
-# Ajouts pour LLM via Ollama
-langchain==0.3.0
-langchain-ollama==0.2.0
+
+# LangGraph Multi-Agent System
+langgraph==1.0.3
+langchain==1.0.8
+langchain-core==1.1.0
+langchain-openai==1.0.3
+langchain-community==0.4.1
+langchain-text-splitters==1.0.0
+
+# Database
+psycopg2-binary==2.9.11
+sqlalchemy-utils==0.42.0
