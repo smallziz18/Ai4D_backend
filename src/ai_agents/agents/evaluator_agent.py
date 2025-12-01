@@ -8,6 +8,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from src.config import Config
 from src.ai_agents.agent_state import AgentState
 from src.ai_agents.shared_context import shared_context_service
+from src.ai_agents.agents.open_question_analyzer import open_question_analyzer
 
 
 EVALUATOR_SYSTEM_PROMPT = """
@@ -286,15 +287,87 @@ class EvaluatorAgent:
         if not questions or not responses:
             return {"error_message": "Pas de questions ou réponses à évaluer", "needs_human_review": True}
 
+        # 🆕 ANALYSE APPROFONDIE DES QUESTIONS OUVERTES AVEC GPT-4
+        print("🔍 Analyse approfondie des questions ouvertes avec GPT-4...")
+
+        # Identifier les questions ouvertes
+        open_questions_data = []
+        for i, (q, r) in enumerate(zip(questions, responses)):
+            q_type = q.get("type", "")
+            if q_type in ["QuestionOuverte", "ListeOuverte"]:
+                open_questions_data.append({
+                    "numero": i + 1,
+                    "question": q.get("question", ""),
+                    "user_answer": r.get("answer", ""),
+                    "expected_answer": q.get("correction", "")
+                })
+
+        # Analyser avec GPT-4 si des questions ouvertes existent
+        gpt4_analysis = None
+        if open_questions_data:
+            try:
+                gpt4_analysis = await open_question_analyzer.analyze_multiple_open_questions(
+                    open_questions_data
+                )
+                print(f"✅ GPT-4 analyse complétée: Niveau estimé {gpt4_analysis['synthese_globale']['niveau_estime']}/10")
+            except Exception as e:
+                print(f"⚠️ Erreur analyse GPT-4: {e}")
+                gpt4_analysis = None
+
         # Calcul déterministe initial
-        deterministic = self._deterministic_evaluation(questions, responses)  # plus coroutine
+        deterministic = self._deterministic_evaluation(questions, responses)
         eval_globale = deterministic.get("evaluation_globale", {})
         niveau_final = eval_globale.get("niveau_final", 5)
         niveau_label = eval_globale.get("niveau_label", "Indéterminé")
 
+        # 🆕 FUSIONNER LES RÉSULTATS GPT-4 DANS L'ÉVALUATION
+        if gpt4_analysis:
+            synthese = gpt4_analysis["synthese_globale"]
+
+            # Enrichir l'évaluation avec les analyses GPT-4
+            deterministic["analyse_gpt4_questions_ouvertes"] = gpt4_analysis["analyses_individuelles"]
+            deterministic["forces_identifiees"] = synthese.get("points_forts_globaux", [])
+            deterministic["faiblesses_identifiees"] = synthese.get("points_amelioration_globaux", [])
+
+            # Ajuster le niveau final basé sur l'analyse GPT-4 (pondéré)
+            niveau_gpt4 = synthese.get("niveau_estime", niveau_final)
+
+            # Moyenne pondérée : 70% GPT-4 (questions ouvertes), 30% déterministe (QCM)
+            niveau_final_ajuste = (niveau_gpt4 * 0.7) + (niveau_final * 0.3)
+            niveau_final = round(niveau_final_ajuste, 1)
+
+            # Mettre à jour le label
+            if niveau_final <= 2:
+                niveau_label = "Débutant absolu"
+            elif niveau_final <= 3:
+                niveau_label = "Débutant"
+            elif niveau_final <= 5:
+                niveau_label = "Intermédiaire bas"
+            elif niveau_final <= 7:
+                niveau_label = "Intermédiaire"
+            elif niveau_final <= 8:
+                niveau_label = "Avancé"
+            else:
+                niveau_label = "Expert"
+
+            # Mettre à jour l'évaluation globale
+            eval_globale["niveau_final"] = niveau_final
+            eval_globale["niveau_label"] = niveau_label
+            eval_globale["niveau_gpt4"] = niveau_gpt4
+            eval_globale["score_moyen_questions_ouvertes_gpt4"] = synthese.get("score_moyen", 0)
+
+            deterministic["evaluation_globale"] = eval_globale
+
+            # Enrichir les recommandations
+            recommendations = deterministic.get("recommandations", [])
+            recommendations.extend(synthese.get("suggestions_globales", []))
+            deterministic["recommandations"] = list(set(recommendations))[:10]  # Max 10, dédupliqué
+
+            print(f"🎓 Niveau final ajusté avec GPT-4: {niveau_final}/10 ({niveau_label})")
+
         # Décider si on appelle le LLM pour enrichir (seulement si au moins une réponse ouverte non vide)
         answered_open = eval_globale.get("open_answered", 0)
-        use_llm = answered_open > 0
+        use_llm = answered_open > 0 and not gpt4_analysis  # Pas de LLM si GPT-4 déjà utilisé
 
         if not use_llm:
             # Pas d'appel LLM : retourner directement

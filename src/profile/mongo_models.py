@@ -65,3 +65,157 @@ class ProfilMongoDB(BaseModel):
         "arbitrary_types_allowed": True,
         "json_encoders": {ObjectId: str}
     }
+
+
+class CourseMongoDB(BaseModel):
+    """Modèle Cours pour MongoDB"""
+    id: Optional[PyObjectIdAnnotated] = Field(default_factory=PyObjectId, alias="_id")
+    course_id: str  # ID unique du cours
+    titre: str
+    description: str
+    niveau: str  # Débutant, Intermédiaire, Avancé
+    duree_totale: str  # "6 semaines", "40 heures", etc.
+    objectifs: List[str] = Field(default_factory=list)
+    prerequis: List[str] = Field(default_factory=list)
+    tags: List[str] = Field(default_factory=list)
+
+    # Structure du cours
+    modules: List[Dict[str, Any]] = Field(default_factory=list)
+    ressources_globales: Dict[str, Any] = Field(default_factory=dict)
+    evaluation_finale: Optional[Dict[str, Any]] = None
+
+    # Métadonnées
+    created_by: str = "CourseManagerAgent"
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
+    total_enrollments: int = Field(default=0, ge=0)
+    average_rating: float = Field(default=0.0, ge=0.0, le=5.0)
+
+    model_config = {
+        "populate_by_name": True,
+        "arbitrary_types_allowed": True,
+        "json_encoders": {ObjectId: str}
+    }
+
+
+class UserProgressionMongoDB(BaseModel):
+    """Modèle Progression Utilisateur pour MongoDB"""
+    id: Optional[PyObjectIdAnnotated] = Field(default_factory=PyObjectId, alias="_id")
+    utilisateur_id: UUID
+    course_id: str
+
+    # Progression globale
+    started_at: datetime = Field(default_factory=datetime.now)
+    last_activity: datetime = Field(default_factory=datetime.now)
+    completion_percentage: float = Field(default=0.0, ge=0.0, le=100.0)
+    estimated_completion_date: Optional[datetime] = None
+
+    # Modules complétés
+    completed_modules: List[str] = Field(default_factory=list)
+    current_module: Optional[str] = None
+
+    # Leçons complétées
+    completed_lessons: List[str] = Field(default_factory=list)
+    current_lesson: Optional[str] = None
+
+    # Évaluations
+    module_evaluations: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
+    # Format: {"module_1": {"score": 85, "passed": true, "attempts": 2, "date": "..."}}
+
+    # Projets
+    completed_projects: List[Dict[str, Any]] = Field(default_factory=list)
+
+    # Temps passé
+    total_time_minutes: int = Field(default=0, ge=0)
+    time_per_module: Dict[str, int] = Field(default_factory=dict)
+
+    # Gamification
+    xp_earned_course: int = Field(default=0, ge=0)
+    badges_earned_course: List[str] = Field(default_factory=list)
+
+    # Notes et feedback utilisateur
+    user_notes: List[Dict[str, Any]] = Field(default_factory=list)
+    user_rating: Optional[float] = Field(default=None, ge=0.0, le=5.0)
+    user_feedback: Optional[str] = None
+
+    model_config = {
+        "populate_by_name": True,
+        "arbitrary_types_allowed": True,
+        "json_encoders": {ObjectId: str, UUID: str}
+    }
+
+
+class ChatConversationMongoDB(BaseModel):
+    """Modèle Conversation Chatbot pour MongoDB"""
+    id: Optional[PyObjectIdAnnotated] = Field(default_factory=PyObjectId, alias="_id")
+    utilisateur_id: UUID
+    session_id: str
+
+    # Métadonnées conversation
+    started_at: datetime = Field(default_factory=datetime.now)
+    last_message_at: datetime = Field(default_factory=datetime.now)
+    total_messages: int = Field(default=0, ge=0)
+
+    # Messages
+    messages: List[Dict[str, Any]] = Field(default_factory=list)
+    # Format: {"role": "user|assistant", "content": "...", "timestamp": "...", "intention": {...}}
+
+    # Contexte
+    context_snapshot: Dict[str, Any] = Field(default_factory=dict)
+    # Snapshot du contexte utilisateur au début de la conversation
+
+    # Tags et catégorisation
+    topics_discussed: List[str] = Field(default_factory=list)
+    intentions_detected: List[str] = Field(default_factory=list)
+
+    # Satisfaction
+    user_satisfaction: Optional[int] = Field(default=None, ge=1, le=5)
+    resolved: bool = Field(default=False)
+
+    model_config = {
+        "populate_by_name": True,
+        "arbitrary_types_allowed": True,
+        "json_encoders": {ObjectId: str, UUID: str}
+    }
+
+
+class LearningPathMongoDB(BaseModel):
+    """Modèle Parcours d'Apprentissage pour MongoDB"""
+    id: Optional[PyObjectIdAnnotated] = Field(default_factory=PyObjectId, alias="_id")
+    utilisateur_id: UUID
+
+    # Parcours global
+    parcours_global: Dict[str, Any] = Field(default_factory=dict)
+
+    # Quêtes
+    quetes_principales: List[Dict[str, Any]] = Field(default_factory=list)
+    quetes_secondaires: List[Dict[str, Any]] = Field(default_factory=list)
+    boss_fights: List[Dict[str, Any]] = Field(default_factory=list)
+
+    # Progression
+    quetes_completed: List[str] = Field(default_factory=list)
+    current_quest: Optional[str] = None
+
+    # Skill Tree
+    skill_tree: Dict[str, Any] = Field(default_factory=dict)
+    unlocked_skills: List[str] = Field(default_factory=list)
+
+    # XP et niveau
+    total_xp_available: int = Field(default=0, ge=0)
+    xp_earned: int = Field(default=0, ge=0)
+    current_level: int = Field(default=1, ge=1)
+
+    # Badges
+    badges_earned: List[str] = Field(default_factory=list)
+
+    # Métadonnées
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
+    created_by: str = "TutoringAgent"
+
+    model_config = {
+        "populate_by_name": True,
+        "arbitrary_types_allowed": True,
+        "json_encoders": {ObjectId: str, UUID: str}
+    }
+

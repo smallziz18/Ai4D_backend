@@ -145,6 +145,154 @@ def _clean_json_like(text: str):
     return cleaned, None
 
 
+@app.task(name="chatbot_task", bind=True)
+def chatbot_task(self, user_id: str, session_id: str, message: str, user_context: dict = None):
+    """Tâche async pour le chatbot IA"""
+    try:
+        from src.ai_agents.agents.chatbot_agent import chatbot_agent
+        from src.profile.learning_services import chatbot_service
+
+        # Exécuter le chatbot de manière synchrone
+        response = async_to_sync(chatbot_agent.chat)(
+            user_id=user_id,
+            session_id=session_id,
+            message=message,
+            user_context=user_context
+        )
+
+        # Sauvegarder dans MongoDB
+        async_to_sync(chatbot_service.add_message)(
+            utilisateur_id=user_id,
+            session_id=session_id,
+            role="user",
+            content=message
+        )
+
+        async_to_sync(chatbot_service.add_message)(
+            utilisateur_id=user_id,
+            session_id=session_id,
+            role="assistant",
+            content=response.get("response", "")
+        )
+
+        return {
+            "status": "success",
+            "response": response,
+            "task_id": self.request.id
+        }
+    except Exception as e:
+        print(f"Erreur chatbot_task: {str(e)}")
+        return {
+            "status": "failed",
+            "error": str(e),
+            "task_id": self.request.id
+        }
+
+
+@app.task(name="course_generation_task", bind=True)
+def course_generation_task(self, user_id: str, topic: str, user_level: int, duration_weeks: int = 6):
+    """Tâche async pour la génération de cours"""
+    try:
+        from src.ai_agents.agents.course_manager_agent import course_manager_agent
+        from src.profile.learning_services import course_service, progression_service
+
+        # Générer la roadmap
+        roadmap = async_to_sync(course_manager_agent.create_course_roadmap)(
+            course_topic=topic,
+            user_level=user_level,
+            user_objectives="",
+            duration_weeks=duration_weeks
+        )
+
+        # Sauvegarder le cours
+        course_id = async_to_sync(course_service.create_course)(roadmap)
+
+        # Créer la progression
+        async_to_sync(progression_service.create_progression)(
+            utilisateur_id=user_id,
+            course_id=roadmap["cours"]["id"]
+        )
+
+        # Incrémenter les inscriptions
+        async_to_sync(course_service.increment_enrollment)(roadmap["cours"]["id"])
+
+        return {
+            "status": "success",
+            "course_id": course_id,
+            "roadmap": roadmap,
+            "task_id": self.request.id
+        }
+    except Exception as e:
+        print(f"Erreur course_generation_task: {str(e)}")
+        return {
+            "status": "failed",
+            "error": str(e),
+            "task_id": self.request.id
+        }
+
+
+@app.task(name="module_completion_task", bind=True)
+def module_completion_task(self, user_id: str, course_id: str, module_id: str, score: float, time_spent: int):
+    """Tâche async pour la complétion de module"""
+    try:
+        from src.ai_agents.agents.course_manager_agent import course_manager_agent
+        from src.profile.learning_services import progression_service
+        from src.profile.services import profile_service
+
+        # Valider la complétion
+        validation_result = async_to_sync(course_manager_agent.validate_module_completion)(
+            user_id=user_id,
+            session_id=f"course_{course_id}",
+            module_id=module_id,
+            evaluation_results={
+                "score": score,
+                "seuil_reussite": 70
+            }
+        )
+
+        if validation_result.get("module_completed"):
+            # Marquer comme complété
+            async_to_sync(progression_service.complete_module)(
+                utilisateur_id=user_id,
+                course_id=course_id,
+                module_id=module_id,
+                evaluation_result={
+                    "score": score,
+                    "passed": True,
+                    "date": json.dumps(json.loads(json.dumps(str(__import__('datetime').datetime.now())))[:-1], default=str)
+                }
+            )
+
+            # Ajouter du temps
+            async_to_sync(progression_service.add_time_spent)(
+                utilisateur_id=user_id,
+                course_id=course_id,
+                minutes=time_spent,
+                module_id=module_id
+            )
+
+            # Gagner XP
+            profil = async_to_sync(profile_service.get_profile_by_user_id)(user_id)
+            if profil:
+                async_to_sync(profile_service.add_xp)(
+                    user_id,
+                    validation_result.get("xp_gained", 200)
+                )
+
+        return {
+            "status": "success",
+            "validation_result": validation_result,
+            "task_id": self.request.id
+        }
+    except Exception as e:
+        print(f"Erreur module_completion_task: {str(e)}")
+        return {
+            "status": "failed",
+            "error": str(e),
+            "task_id": self.request.id
+        }
+
+
 @app.task(name="generate_profile_question_task")
 def generate_profile_question_task(user_data: dict):
     """Génère une question personnalisée (LLM si dispo), sinon fallback.
@@ -392,3 +540,229 @@ def profile_analysis_task(user_data: dict, evaluation: dict, is_initial: bool = 
         import traceback
         traceback.print_exc()
         return {"ok": False, "error": str(e)}
+
+
+# ==================== CHATBOT STREAMING (SCALABLE) ====================
+
+@app.task(name="chatbot_streaming_task", bind=True)
+def chatbot_streaming_task(self, user_id: str, session_id: str, message: str):
+    """
+    Tâche Celery qui stream la réponse GPT-4 via Redis Pub/Sub.
+
+    Cette approche permet:
+    - Réponse FastAPI immédiate (non bloquée)
+    - Streaming temps réel via WebSocket
+    - Scalabilité à 10,000+ utilisateurs simultanés
+
+    Args:
+        user_id: ID de l'utilisateur
+        session_id: ID de session
+        message: Message de l'utilisateur
+
+    Returns:
+        Dict avec la réponse complète et les métadonnées
+    """
+    from openai import OpenAI
+    from src.db.redis import r as redis_client
+    from src.profile.services import profile_service
+    from src.profile.learning_services import chatbot_service
+    from src.ai_agents.agents.chatbot_agent import CHATBOT_SYSTEM_PROMPT
+    from datetime import datetime, UTC
+
+    task_id = self.request.id
+    channel = f"chatbot_stream:{task_id}"
+
+    try:
+        print(f"[CHATBOT_STREAMING] Task {task_id} started for user {user_id}")
+
+        # 1. Récupérer le profil utilisateur
+        profil = async_to_sync(profile_service.get_profile_by_user_id)(user_id)
+
+        user_context = {}
+        if profil:
+            user_context = {
+                "niveau_technique": profil.niveau,
+                "competences": profil.competences,
+                "objectifs": profil.objectifs,
+                "xp": profil.xp,
+                "badges": profil.badges
+            }
+
+        # 2. Construire le contexte pour le prompt
+        context_str = f"""
+PROFIL APPRENANT :
+- Niveau : {user_context.get('niveau_technique', 5)}/10
+- Compétences : {', '.join(user_context.get('competences', [])) or 'Non identifiées'}
+- Objectifs : {user_context.get('objectifs', 'Non définis')}
+- XP : {user_context.get('xp', 0)}
+"""
+
+        # 3. Construire les messages pour OpenAI
+        messages = [
+            {"role": "system", "content": CHATBOT_SYSTEM_PROMPT},
+            {"role": "system", "content": f"CONTEXTE UTILISATEUR:\n{context_str}"},
+            {"role": "user", "content": message}
+        ]
+
+        # 4. Stream depuis OpenAI
+        client = OpenAI(api_key=Config.OPENAI_API_KEY)
+
+        stream = client.chat.completions.create(
+            model="gpt-4o",
+            messages=messages,
+            stream=True,
+            temperature=0.7
+        )
+
+        full_response = ""
+        chunk_count = 0
+
+        # Publier le début du streaming
+        redis_client.publish(
+            channel,
+            json.dumps({
+                "type": "stream_started",
+                "task_id": task_id,
+                "timestamp": datetime.now(UTC).isoformat()
+            })
+        )
+
+        # 5. Stream les chunks
+        for chunk in stream:
+            if chunk.choices[0].delta.content:
+                content = chunk.choices[0].delta.content
+                full_response += content
+                chunk_count += 1
+
+                # Publier le chunk sur Redis
+                redis_client.publish(
+                    channel,
+                    json.dumps({
+                        "type": "chunk",
+                        "content": content,
+                        "chunk_number": chunk_count,
+                        "timestamp": datetime.now(UTC).isoformat()
+                    })
+                )
+
+        print(f"[CHATBOT_STREAMING] Streamed {chunk_count} chunks, total length: {len(full_response)}")
+
+        # 6. Analyser l'intention
+        message_lower = message.lower()
+        intentions = {
+            "concept_question": any(word in message_lower for word in ["qu'est-ce", "comment", "pourquoi", "expliquer", "définir"]),
+            "code_help": any(word in message_lower for word in ["code", "erreur", "bug", "implémenter"]),
+            "resource_request": any(word in message_lower for word in ["ressource", "cours", "tutoriel", "livre", "vidéo"]),
+            "motivation": any(word in message_lower for word in ["difficile", "bloqué", "abandonner", "démotivé"]),
+        }
+
+        primary_intention = max(intentions.items(), key=lambda x: x[1])
+
+        intention = {
+            "primary": primary_intention[0],
+            "confidence": 0.8 if primary_intention[1] else 0.3,
+            "all_intentions": {k: v for k, v in intentions.items() if v}
+        }
+
+        # 7. Générer des suggestions
+        suggestions_map = {
+            "concept_question": [
+                "💡 Peux-tu me donner un exemple concret ?",
+                "📊 Montre-moi un cas d'utilisation",
+                "🔗 Quel est le lien avec ce que j'ai déjà appris ?"
+            ],
+            "code_help": [
+                "🔍 Où se trouve exactement l'erreur ?",
+                "💻 Montre-moi comment déboguer",
+                "📝 Quelles sont les bonnes pratiques ?"
+            ],
+            "resource_request": [
+                "📚 Quelles ressources pour mon niveau ?",
+                "🎥 Y a-t-il des vidéos recommandées ?",
+                "💼 Des projets pratiques à faire ?"
+            ],
+            "motivation": [
+                "🎯 Quels sont mes progrès jusqu'ici ?",
+                "⚡ Comment rester motivé ?",
+                "🏆 Quels sont mes prochains objectifs ?"
+            ]
+        }
+
+        suggestions = suggestions_map.get(intention["primary"], [
+            "💬 Pose-moi une question",
+            "📚 Voir mes cours",
+            "📊 Voir ma progression"
+        ])
+
+        # 8. Publier le message de complétion
+        redis_client.publish(
+            channel,
+            json.dumps({
+                "type": "complete",
+                "full_response": full_response,
+                "intention": intention,
+                "suggestions": suggestions,
+                "timestamp": datetime.now(UTC).isoformat(),
+                "stats": {
+                    "chunks": chunk_count,
+                    "length": len(full_response),
+                    "session_id": session_id
+                }
+            })
+        )
+
+        # 9. Sauvegarder dans MongoDB
+        try:
+            async_to_sync(chatbot_service.add_message)(
+                utilisateur_id=user_id,
+                session_id=session_id,
+                role="user",
+                content=message
+            )
+
+            async_to_sync(chatbot_service.add_message)(
+                utilisateur_id=user_id,
+                session_id=session_id,
+                role="assistant",
+                content=full_response,
+                intention=intention
+            )
+        except Exception as db_error:
+            print(f"[CHATBOT_STREAMING] Warning: Failed to save to MongoDB: {db_error}")
+
+        print(f"[CHATBOT_STREAMING] Task {task_id} completed successfully")
+
+        return {
+            "status": "success",
+            "response": full_response,
+            "intention": intention,
+            "suggestions": suggestions,
+            "chunks_sent": chunk_count,
+            "task_id": task_id
+        }
+
+    except Exception as e:
+        error_msg = str(e)
+        print(f"[CHATBOT_STREAMING] Task {task_id} failed: {error_msg}")
+        import traceback
+        traceback.print_exc()
+
+        # Publier l'erreur sur Redis
+        try:
+            redis_client.publish(
+                channel,
+                json.dumps({
+                    "type": "error",
+                    "error": error_msg,
+                    "timestamp": datetime.now(UTC).isoformat()
+                })
+            )
+        except:
+            pass
+
+        return {
+            "status": "error",
+            "error": error_msg,
+            "task_id": task_id
+        }
+

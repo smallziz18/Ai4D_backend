@@ -2,10 +2,9 @@ from typing import Optional, Dict, Any, List
 from uuid import UUID
 from datetime import datetime
 from bson import ObjectId
-from pymongo.collection import Collection
 from pymongo.errors import DuplicateKeyError
 
-from src.db.mongo_db import mongo_db
+from src.db.mongo_db import async_mongo_db
 from src.profile.mongo_models import ProfilMongoDB
 from src.profile.schema import ProfilCreate, ProfilUpdate
 from src.profile.gamification import (
@@ -14,17 +13,11 @@ from src.profile.gamification import (
 )
 
 
-
-
-
-
 class ProfileService:
     """Service pour gérer les profils utilisateurs dans MongoDB"""
 
     def __init__(self):
-        self.collection: Collection = mongo_db.profils
-        # Créer un index unique sur utilisateur_id
-        self.collection.create_index("utilisateur_id", unique=True)
+        self.collection = async_mongo_db.profils
 
     async def create_profile(self, profile_data: ProfilCreate) -> ProfilMongoDB:
         """Créer un nouveau profil utilisateur"""
@@ -40,15 +33,15 @@ class ProfileService:
         profil_dict["utilisateur_id"] = str(profil_dict["utilisateur_id"])
 
         try:
-            result = self.collection.insert_one(profil_dict)
-            created_profil = self.collection.find_one({"_id": result.inserted_id})
+            result = await self.collection.insert_one(profil_dict)
+            created_profil = await self.collection.find_one({"_id": result.inserted_id})
             return ProfilMongoDB(**created_profil)
         except DuplicateKeyError:
             raise ValueError(f"Profile already exists for user {profile_data.utilisateur_id}")
 
     async def get_profile_by_user_id(self, user_id: UUID) -> Optional[ProfilMongoDB]:
         """Récupérer le profil d'un utilisateur par son ID"""
-        profil_data = self.collection.find_one({"utilisateur_id": str(user_id)})
+        profil_data = await self.collection.find_one({"utilisateur_id": str(user_id)})
         if profil_data:
             return ProfilMongoDB(**profil_data)
         return None
@@ -58,7 +51,7 @@ class ProfileService:
         if not ObjectId.is_valid(profile_id):
             return None
 
-        profil_data = self.collection.find_one({"_id": ObjectId(profile_id)})
+        profil_data = await self.collection.find_one({"_id": ObjectId(profile_id)})
         if profil_data:
             return ProfilMongoDB(**profil_data)
         return None
@@ -68,7 +61,7 @@ class ProfileService:
         update_dict = {k: v for k, v in update_data.model_dump().items() if v is not None}
         update_dict["updated_at"] = datetime.now()
 
-        result = self.collection.find_one_and_update(
+        result = await self.collection.find_one_and_update(
             {"utilisateur_id": str(user_id)},
             {"$set": update_dict},
             return_document=True
@@ -80,12 +73,12 @@ class ProfileService:
 
     async def delete_profile(self, user_id: UUID) -> bool:
         """Supprimer le profil d'un utilisateur"""
-        result = self.collection.delete_one({"utilisateur_id": str(user_id)})
+        result = await self.collection.delete_one({"utilisateur_id": str(user_id)})
         return result.deleted_count > 0
 
     async def add_xp(self, user_id: UUID, xp_points: int) -> Optional[ProfilMongoDB]:
         """Ajouter des points d'expérience et gérer les montées de niveau"""
-        result = self.collection.find_one_and_update(
+        result = await self.collection.find_one_and_update(
             {"utilisateur_id": str(user_id)},
             {
                 "$inc": {"xp": xp_points},
@@ -98,13 +91,13 @@ class ProfileService:
             profil = ProfilMongoDB(**result)
             await self._check_level_up(profil)
             # Récupérer le profil mis à jour
-            updated_profil = self.collection.find_one({"_id": profil.id})
+            updated_profil = await self.collection.find_one({"_id": profil.id})
             return ProfilMongoDB(**updated_profil) if updated_profil else profil
         return None
 
     async def add_badge(self, user_id: UUID, badge: str) -> Optional[ProfilMongoDB]:
         """Ajouter un badge au profil"""
-        result = self.collection.find_one_and_update(
+        result = await self.collection.find_one_and_update(
             {"utilisateur_id": str(user_id)},
             {
                 "$addToSet": {"badges": badge},
@@ -119,7 +112,7 @@ class ProfileService:
 
     async def add_competence(self, user_id: UUID, competence: str) -> Optional[ProfilMongoDB]:
         """Ajouter une compétence au profil"""
-        result = self.collection.find_one_and_update(
+        result = await self.collection.find_one_and_update(
             {"utilisateur_id": str(user_id)},
             {
                 "$addToSet": {"competences": competence},
@@ -140,7 +133,7 @@ class ProfileService:
             "timestamp": datetime.now()
         }
 
-        result = self.collection.find_one_and_update(
+        result = await self.collection.find_one_and_update(
             {"utilisateur_id": str(user_id)},
             {
                 "$push": {"historique_activites": activity},
@@ -155,7 +148,7 @@ class ProfileService:
 
     async def update_preferences(self, user_id: UUID, preferences: Dict[str, Any]) -> Optional[ProfilMongoDB]:
         """Mettre à jour les préférences utilisateur"""
-        result = self.collection.find_one_and_update(
+        result = await self.collection.find_one_and_update(
             {"utilisateur_id": str(user_id)},
             {
                 "$set": {
@@ -219,12 +212,13 @@ class ProfileService:
         from sqlmodel import select
 
         cursor = self.collection.find({}).sort("xp", -1).limit(limit)
+        profiles = await cursor.to_list(length=limit)
 
         leaderboard = []
 
         # Récupérer les usernames depuis PostgreSQL
         async with get_session() as session:
-            for i, profil_data in enumerate(cursor, 1):
+            for i, profil_data in enumerate(profiles, 1):
                 profil = ProfilMongoDB(**profil_data)
 
                 # Récupérer le username de l'utilisateur
@@ -249,7 +243,7 @@ class ProfileService:
         nouveau_niveau = profil.xp // 1000 + 1
 
         if nouveau_niveau > profil.niveau:
-            self.collection.update_one(
+            await self.collection.update_one(
                 {"_id": profil.id},
                 {
                     "$set": {
@@ -469,7 +463,7 @@ class ProfileService:
         }
 
         # Appliquer la mise à jour
-        self.collection.update_one(
+        await self.collection.update_one(
             {"utilisateur_id": str(user_id)},
             {"$set": update_fields}
         )
@@ -616,7 +610,7 @@ class ProfileService:
                 update_fields["recommandations"] = recommandations
 
         # Appliquer la mise à jour
-        self.collection.update_one(
+        await self.collection.update_one(
             {"utilisateur_id": str(user_id)},
             {"$set": update_fields}
         )
@@ -640,7 +634,8 @@ class ProfileService:
 
     async def has_profile(self, user_id: UUID) -> bool:
         """Retourne True si un profil existe pour cet utilisateur, sinon False (rapide)."""
-        return self.collection.find_one({"utilisateur_id": str(user_id)}, {"_id": 1}) is not None
+        result = await self.collection.find_one({"utilisateur_id": str(user_id)}, {"_id": 1})
+        return result is not None
 
 
 # Instance globale du service

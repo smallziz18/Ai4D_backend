@@ -1,5 +1,5 @@
 """
-Agent de tutoring - Propose des tutoriels et parcours d'apprentissage personnalisés.
+Agent de tutorat personnalisé - Accompagne l'utilisateur dans son apprentissage.
 """
 from typing import Dict, Any, List
 from langchain_openai import ChatOpenAI
@@ -12,187 +12,140 @@ from src.ai_agents.shared_context import shared_context_service
 
 
 TUTORING_SYSTEM_PROMPT = """
-Tu es un tuteur expert en IA qui crée des parcours d'apprentissage personnalisés.
+Tu es un tuteur IA expert et bienveillant spécialisé en Intelligence Artificielle.
 
 🎯 Ta mission :
-Créer un parcours d'apprentissage ludique et engageant basé sur :
-- Les forces et faiblesses identifiées
-- Le niveau réel de l'apprenant
-- Ses objectifs et style d'apprentissage
+Accompagner l'apprenant de manière personnalisée dans son parcours d'apprentissage.
 
-🎮 GAMIFICATION - Approche RPG :
-- Chaque concept IA = **Quête** à accomplir
-- Progression = Gain d'XP et déblocage de nouveaux domaines
-- Badges = Accomplissements spécifiques
-- Boss Fights = Projets complexes qui valident la maîtrise
+👨‍🏫 Ton rôle :
+1. **Expliquer les concepts** de manière adaptée au niveau
+2. **Détecter les difficultés** et ajuster l'approche
+3. **Donner des exemples concrets** et relatable
+4. **Encourager** sans être condescendant
+5. **Proposer des exercices** progressifs
 
-📚 STRUCTURE DU PARCOURS :
+🎓 Principes pédagogiques :
 
-1. **Quêtes Principales** (Concepts fondamentaux)
-   - Titre accrocheur style RPG
-   - Objectif clair et mesurable
-   - Ressources recommandées (articles, vidéos, code)
-   - XP à gagner
+**Adaptation au niveau :**
+- Débutant (1-3) : Analogies simples, pas de jargon technique
+- Intermédiaire (4-6) : Balance théorie/pratique, termes techniques expliqués
+- Avancé (7-10) : Discussions approfondies, références papiers de recherche
 
-2. **Quêtes Secondaires** (Approfondissement)
-   - Projets pratiques
-   - Exercices interactifs
-   - Défis de code
+**Style d'explication :**
+- 🔹 Commence toujours par une analogie ou exemple concret
+- 🔹 Explique le "pourquoi" avant le "comment"
+- 🔹 Donne des exemples de code si pertinent
+- 🔹 Propose des visualisations ou schémas
+- 🔹 Termine par des exercices pratiques
 
-3. **Boss Fights** (Projets d'intégration)
-   - Projets complets qui combinent plusieurs concepts
-   - Validation du niveau atteint
+**Détection de difficultés :**
+- Si l'apprenant pose la même question → Changer d'approche pédagogique
+- Si l'apprenant est découragé → Encourager et simplifier
+- Si l'apprenant est confus → Revenir aux bases
 
-4. **Skill Tree** (Arbre de compétences)
-   - Dépendances entre concepts
-   - Progression logique
-
-🎯 ADAPTATION AU NIVEAU :
-- **Débutant (1-3)** : Bases solides, pas de rush, beaucoup de pratique
-- **Intermédiaire (4-6)** : Projets guidés, introduction aux concepts avancés
-- **Avancé (7-10)** : Architectures complexes, optimisations, recherche
+🎮 Gamification :
+- Célèbre les progrès (même petits)
+- Propose des défis adaptés
+- Encourage la curiosité
 
 FORMAT JSON STRICT :
 {
-    "parcours_global": {
-        "titre": "De Novice à Maître des Réseaux de Neurones",
-        "description": "Un voyage épique à travers le Deep Learning",
-        "duree_estimee": "8 semaines",
-        "niveau_initial": 5,
-        "niveau_cible": 8
-    },
-    "quetes_principales": [
-        {
-            "id": "quest_1",
-            "titre": "🎯 La Quête du Neurone Artificiel",
-            "description": "Maîtrise les fondements des réseaux de neurones",
-            "objectifs": [
-                "Comprendre le fonctionnement d'un neurone artificiel",
-                "Implémenter un perceptron from scratch"
-            ],
-            "ressources": [
-                {
-                    "type": "article",
-                    "titre": "Neural Networks from Scratch",
-                    "url": "https://example.com",
-                    "duree": "30 min"
-                }
-            ],
-            "exercices": [
-                "Implémenter un perceptron en Python",
-                "Visualiser la fonction d'activation"
-            ],
-            "xp": 100,
-            "badge": "Neurone Novice",
-            "prerequis": [],
-            "difficulte": "facile"
-        }
-    ],
-    "quetes_secondaires": [
-        {
-            "id": "side_quest_1",
-            "titre": "🔍 Le Mystère de l'Overfitting",
-            "description": "Découvre pourquoi ton modèle mémorise au lieu d'apprendre",
-            "xp": 50,
-            "badge": "Régularisation Rookie"
-        }
-    ],
-    "boss_fights": [
-        {
-            "id": "boss_1",
-            "titre": "⚔️ Le Classificateur MNIST",
-            "description": "Crée un réseau de neurones qui reconnaît les chiffres manuscrits",
-            "objectifs": [
-                "Atteindre 95% de précision sur MNIST",
-                "Comprendre l'architecture utilisée"
-            ],
-            "xp": 500,
-            "badge": "Vainqueur de MNIST",
-            "prerequis": ["quest_1", "quest_2", "quest_3"]
-        }
-    ],
-    "skill_tree": {
-        "neurones_artificiels": {
-            "niveau": 1,
-            "debloques": ["perceptron", "activation_functions"],
-            "prochains": ["mlp", "backpropagation"]
-        }
-    },
-    "recommandations_immediates": [
-        "Commence par la Quête du Neurone Artificiel",
-        "Pratique 30 minutes par jour",
-        "Rejoins une communauté d'apprenants"
-    ]
+  "explication": "Explication détaillée et pédagogique du concept...",
+  "analogie": "Analogie concrète pour faciliter la compréhension",
+  "exemple_code": "# Code Python illustratif (si pertinent)",
+  "points_cles": ["Point 1", "Point 2", "Point 3"],
+  "exercices_proposes": [
+    {
+      "titre": "Exercice 1",
+      "description": "...",
+      "difficulte": "facile|moyen|difficile",
+      "temps_estime": "15 minutes"
+    }
+  ],
+  "ressources_complementaires": [
+    {
+      "titre": "Vidéo YouTube recommandée",
+      "url": "https://...",
+      "type": "video|article|cours"
+    }
+  ],
+  "prochaine_etape": "Suggestion pour la suite de l'apprentissage",
+  "encouragement": "Message motivant personnalisé"
 }
 """
 
 
 class TutoringAgent:
-    """
-    Agent de tutoring et création de parcours d'apprentissage.
-    Approche gamifiée type RPG pour rendre l'apprentissage ludique.
-    """
+    """Agent de tutorat personnalisé."""
 
     def __init__(self):
         self.llm = ChatOpenAI(
-            model="gpt-4o",  # Modèle puissant pour créativité
+            model="gpt-4o",
             api_key=Config.OPENAI_API_KEY,
-            temperature=0.7  # Créativité pour rendre le parcours engageant
+            temperature=0.7  # Créativité pour explications variées
         )
         self.name = "TutoringAgent"
 
-    async def create_learning_path(self, state: AgentState) -> Dict[str, Any]:
+    async def explain_concept(
+        self,
+        concept: str,
+        user_level: int,
+        user_context: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
         """
-        Créer un parcours d'apprentissage personnalisé et gamifié.
+        Explique un concept de manière adaptée au niveau de l'utilisateur.
 
         Args:
-            state: État actuel du workflow
+            concept: Le concept à expliquer
+            user_level: Niveau de l'utilisateur (1-10)
+            user_context: Contexte utilisateur (compétences, objectifs, etc.)
 
         Returns:
-            Mises à jour à appliquer à l'état
+            Dict avec explication détaillée et ressources
         """
-        user_level = state.get("user_level", 5)
-        strengths = state.get("strengths", [])
-        weaknesses = state.get("weaknesses", [])
-        evaluation_results = state.get("evaluation_results", {})
-        user_objectifs = state.get("user_objectifs", "")
-        user_competences = state.get("user_competences", [])
-        user_id = state.get("user_id")
-        session_id = state.get("session_id")
+        user_context = user_context or {}
 
-        # Construire le contexte
-        context = {
-            "niveau_actuel": user_level,
-            "forces": strengths,
-            "faiblesses": weaknesses,
-            "objectifs": user_objectifs,
-            "competences_actuelles": user_competences,
-            "evaluation_detaillee": evaluation_results
-        }
+        # Déterminer le style d'explication selon le niveau
+        if user_level <= 3:
+            style = "très simple, avec des analogies du quotidien"
+            profondeur = "concepts de base uniquement"
+        elif user_level <= 6:
+            style = "équilibré entre théorie et pratique"
+            profondeur = "concepts intermédiaires avec exemples de code"
+        else:
+            style = "technique et approfondi"
+            profondeur = "détails d'implémentation et optimisations"
 
-        context_json = json.dumps(context, indent=2, ensure_ascii=False)
+        # Récupérer les compétences et objectifs
+        competences = user_context.get("competences", [])
+        objectifs = user_context.get("objectifs", "")
+
+        context_str = f"""
+PROFIL APPRENANT :
+- Niveau : {user_level}/10
+- Compétences actuelles : {', '.join(competences) if competences else 'Aucune'}
+- Objectifs : {objectifs or 'Non définis'}
+
+STYLE D'EXPLICATION SOUHAITÉ : {style}
+PROFONDEUR : {profondeur}
+"""
 
         messages = [
             SystemMessage(content=TUTORING_SYSTEM_PROMPT),
             HumanMessage(content=f"""
-Crée un parcours d'apprentissage personnalisé et gamifié pour cet apprenant :
+{context_str}
 
-CONTEXTE :
-{context_json}
+L'apprenant souhaite comprendre : **{concept}**
 
-⚠️ POINTS IMPORTANTS :
-- Niveau actuel : {user_level}/10
-- {len(weaknesses)} faiblesses identifiées à adresser en priorité
-- {len(strengths)} forces à exploiter et renforcer
-- Style RPG : quêtes, XP, badges, boss fights
-
-🎯 OBJECTIFS DU PARCOURS :
-1. Combler les lacunes identifiées (faiblesses)
-2. Renforcer les acquis (forces)
-3. Progresser de manière ludique et engageante
-4. Atteindre un niveau supérieur en 4-6 semaines selon le niveau
-
-Crée maintenant le parcours complet en JSON.
+Explique ce concept de manière pédagogique et adaptée à son niveau.
+Retourne un JSON avec :
+- Explication détaillée
+- Analogie concrète
+- Exemple de code (si pertinent)
+- Points clés à retenir
+- Exercices pratiques
+- Ressources complémentaires
+- Message d'encouragement
             """)
         ]
 
@@ -200,97 +153,218 @@ Crée maintenant le parcours complet en JSON.
             response = await self.llm.ainvoke(messages)
             response_text = response.content
 
-            # Nettoyer et parser JSON
+            # Parser JSON
             if "```json" in response_text:
                 response_text = response_text.split("```json")[1].split("```")[0].strip()
             elif "```" in response_text:
                 response_text = response_text.split("```")[1].split("```")[0].strip()
 
-            learning_path = json.loads(response_text)
-
-            # Calculer l'XP total disponible
-            quetes_principales = learning_path.get("quetes_principales", [])
-            quetes_secondaires = learning_path.get("quetes_secondaires", [])
-            boss_fights = learning_path.get("boss_fights", [])
-
-            total_xp = (
-                sum(q.get("xp", 0) for q in quetes_principales) +
-                sum(q.get("xp", 0) for q in quetes_secondaires) +
-                sum(b.get("xp", 0) for b in boss_fights)
-            )
-
-            await shared_context_service.add_message(
-                user_id,
-                session_id,
-                self.name,
-                f"Parcours créé : {len(quetes_principales)} quêtes principales, {len(boss_fights)} boss fights, {total_xp} XP total"
-            )
-
-            # Créer des tutoriels à partir des quêtes
-            tutorials = []
-            for quete in quetes_principales[:3]:  # Top 3 quêtes pour démarrage immédiat
-                tutorials.append({
-                    "titre": quete.get("titre"),
-                    "description": quete.get("description"),
-                    "ressources": quete.get("ressources", []),
-                    "exercices": quete.get("exercices", []),
-                    "xp": quete.get("xp", 0),
-                    "badge": quete.get("badge")
-                })
-
-            # Enregistrer la décision
-            decision = {
-                "agent": self.name,
-                "timestamp": state.get("updated_at"),
-                "decision": "learning_path_created",
-                "details": {
-                    "num_main_quests": len(quetes_principales),
-                    "num_side_quests": len(quetes_secondaires),
-                    "num_boss_fights": len(boss_fights),
-                    "total_xp": total_xp
-                }
-            }
-
-            # Calculer les badges à débloquer immédiatement (pour démarrage motivant)
-            immediate_badges = []
-            if user_level >= 5:
-                immediate_badges.append("Explorateur IA")
-            if len(strengths) >= 3:
-                immediate_badges.append("Concepteur Polyvalent")
+            explanation = json.loads(response_text)
 
             return {
-                "learning_path": learning_path,
-                "tutorials": tutorials,
-                "badges_earned": state.get("badges_earned", []) + immediate_badges,
-                "agent_decisions": state.get("agent_decisions", []) + [decision],
-                "current_step": "tutoring_complete",
-                "next_step": "gamification",
-                "meta_data": {
-                    **state.get("meta_data", {}),
-                    "total_xp_available": total_xp
-                }
+                "status": "success",
+                "concept": concept,
+                "niveau_apprenant": user_level,
+                **explanation
             }
 
         except Exception as e:
-            error_msg = f"Erreur dans TutoringAgent: {str(e)}"
-
-            await shared_context_service.add_message(
-                user_id,
-                session_id,
-                self.name,
-                error_msg,
-                message_type="system"
-            )
-
+            print(f"❌ Erreur explication concept: {e}")
             return {
-                "error_message": error_msg,
-                "needs_human_review": True
+                "status": "error",
+                "concept": concept,
+                "explication": f"Impossible d'expliquer le concept pour le moment. Erreur: {str(e)}",
+                "analogie": "",
+                "exemple_code": "",
+                "points_cles": [],
+                "exercices_proposes": [],
+                "ressources_complementaires": [],
+                "prochaine_etape": "Réessayer plus tard",
+                "encouragement": "Continue ton apprentissage !"
             }
 
-    def __call__(self, state: AgentState) -> Dict[str, Any]:
-        """Permet d'utiliser l'agent comme une fonction"""
-        import asyncio
-        return asyncio.run(self.create_learning_path(state))
+    async def suggest_exercises(
+        self,
+        topic: str,
+        difficulty: str,
+        user_level: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Suggère des exercices pratiques adaptés.
+
+        Args:
+            topic: Sujet des exercices
+            difficulty: Difficulté souhaitée (facile, moyen, difficile)
+            user_level: Niveau de l'utilisateur
+
+        Returns:
+            Liste d'exercices avec descriptions et temps estimé
+        """
+        messages = [
+            SystemMessage(content=TUTORING_SYSTEM_PROMPT),
+            HumanMessage(content=f"""
+Propose 3 exercices pratiques sur le sujet : **{topic}**
+
+Niveau de l'apprenant : {user_level}/10
+Difficulté souhaitée : {difficulty}
+
+Pour chaque exercice, fournis :
+- Titre clair et engageant
+- Description détaillée de ce qu'il faut faire
+- Objectif pédagogique
+- Temps estimé
+- Indices pour démarrer
+
+Retourne un JSON :
+{{
+  "exercices": [
+    {{
+      "titre": "...",
+      "description": "...",
+      "objectif": "...",
+      "difficulte": "{difficulty}",
+      "temps_estime": "...",
+      "indices": ["Indice 1", "Indice 2"],
+      "technologies": ["Python", "scikit-learn", "..."]
+    }}
+  ]
+}}
+            """)
+        ]
+
+        try:
+            response = await self.llm.ainvoke(messages)
+            response_text = response.content
+
+            if "```json" in response_text:
+                response_text = response_text.split("```json")[1].split("```")[0].strip()
+            elif "```" in response_text:
+                response_text = response_text.split("```")[1].split("```")[0].strip()
+
+            result = json.loads(response_text)
+            return result.get("exercices", [])
+
+        except Exception as e:
+            print(f"❌ Erreur génération exercices: {e}")
+            return []
+
+    async def detect_difficulties(
+        self,
+        user_id: str,
+        session_id: str,
+        recent_interactions: List[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Détecte les difficultés d'apprentissage basées sur l'historique.
+
+        Args:
+            user_id: ID de l'utilisateur
+            session_id: ID de session
+            recent_interactions: Historique récent des interactions
+
+        Returns:
+            Dict avec difficultés détectées et recommandations
+        """
+        # Récupérer le contexte
+        context = await shared_context_service.get_or_create_context(user_id, session_id)
+
+        if not context:
+            return {
+                "difficulties_detected": False,
+                "message": "Pas assez de données pour détecter des difficultés"
+            }
+
+        conversation_history = context.get("conversation_history", [])
+
+        # Analyser l'historique
+        repeated_topics = []
+        confusion_signals = []
+
+        # Détecter les sujets qui reviennent (difficultés potentielles)
+        topic_counts = {}
+        for msg in conversation_history[-20:]:  # 20 derniers messages
+            content = msg.get("content", "").lower()
+
+            # Mots-clés de confusion
+            if any(word in content for word in ["je ne comprends pas", "confus", "difficile", "compliqué"]):
+                confusion_signals.append(msg)
+
+            # Compter les sujets récurrents
+            topics = ["backpropagation", "cnn", "rnn", "transformer", "gradient", "overfitting"]
+            for topic in topics:
+                if topic in content:
+                    topic_counts[topic] = topic_counts.get(topic, 0) + 1
+
+        # Identifier les sujets problématiques (> 2 mentions)
+        for topic, count in topic_counts.items():
+            if count >= 2:
+                repeated_topics.append(topic)
+
+        if repeated_topics or confusion_signals:
+            return {
+                "difficulties_detected": True,
+                "repeated_topics": repeated_topics,
+                "confusion_signals": len(confusion_signals),
+                "recommendation": "Adapter l'approche pédagogique",
+                "suggested_actions": [
+                    f"Revoir les bases de : {', '.join(repeated_topics)}" if repeated_topics else "",
+                    "Utiliser plus d'analogies et d'exemples concrets",
+                    "Proposer des exercices guidés pas à pas",
+                    "Encourager à poser des questions plus spécifiques"
+                ]
+            }
+        else:
+            return {
+                "difficulties_detected": False,
+                "message": "L'apprentissage se déroule bien",
+                "encouragement": "Continue comme ça ! 🎉"
+            }
+
+    async def tutor(self, state: AgentState) -> Dict[str, Any]:
+        """
+        Point d'entrée principal du tutoring agent dans le workflow.
+
+        Args:
+            state: État actuel du workflow
+
+        Returns:
+            Mises à jour à appliquer à l'état
+        """
+        user_id = state.get("user_id")
+        session_id = state.get("session_id")
+        user_level = state.get("user_level", 5)
+        user_profile = state.get("user_profile", {})
+
+        # Détecter les difficultés
+        difficulties = await self.detect_difficulties(user_id, session_id)
+
+        # Logging
+        await shared_context_service.add_message(
+            user_id,
+            session_id,
+            self.name,
+            f"Analyse des difficultés : {difficulties.get('message', 'Aucune difficulté détectée')}"
+        )
+
+        # Préparer les recommandations de tutorat
+        tutorials = []
+
+        # Si difficultés détectées, proposer aide ciblée
+        if difficulties.get("difficulties_detected"):
+            for topic in difficulties.get("repeated_topics", []):
+                explanation = await self.explain_concept(
+                    concept=topic,
+                    user_level=user_level,
+                    user_context=user_profile
+                )
+                tutorials.append(explanation)
+
+        return {
+            "tutoring_analysis": difficulties,
+            "tutorials": tutorials,
+            "current_step": "tutoring_complete",
+            "next_step": "recommendation"
+        }
 
 
 # Instance globale
