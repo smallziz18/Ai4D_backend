@@ -67,11 +67,8 @@ class ChatbotAgent:
     """
 
     def __init__(self):
-        self.llm = ChatOpenAI(
-            model="gpt-4o",
-            api_key=Config.OPENAI_API_KEY,
-            temperature=0.7  # Balance entre précision et personnalité
-        )
+        # Lazy init pour éviter les problèmes de fork dans Celery
+        self.llm = None
         self.name = "ChatbotAgent"
 
     async def chat(
@@ -94,6 +91,14 @@ class ChatbotAgent:
             Réponse avec contexte et métadonnées
         """
         try:
+            # Initialiser le LLM à la première utilisation (dans le bon process)
+            if self.llm is None:
+                self.llm = ChatOpenAI(
+                    model="gpt-4o",
+                    api_key=Config.OPENAI_API_KEY,
+                    temperature=0.7
+                )
+
             # Récupérer le contexte partagé
             context = await shared_context_service.get_or_create_context(user_id, session_id)
 
@@ -309,4 +314,3 @@ PROGRESSION ACTUELLE :
 
 # Instance globale
 chatbot_agent = ChatbotAgent()
-

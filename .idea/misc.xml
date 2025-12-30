@@ -4,4 +4,7 @@
     <option name="sdkName" value="backend_ai_4_d" />
   </component>
   <component name="ProjectRootManager" version="2" project-jdk-name="backend_ai_4_d" project-jdk-type="Python SDK" />
+  <component name="PythonCompatibilityInspectionAdvertiser">
+    <option name="version" value="3" />
+  </component>
 </project>

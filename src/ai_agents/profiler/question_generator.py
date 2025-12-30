@@ -40,10 +40,9 @@ PROFIL UTILISATEUR (pour adapter la difficulté uniquement) :
 
 TYPES DE QUESTIONS :
 1-2: ChoixMultiple (4 options A/B/C/D)
-3-4: VraiOuFaux (A. Vrai / B. Faux)
-5-6: QuestionOuverte (pas d'options)
-7-8: ListeOuverte (pas d'options)
-9-10: ChoixMultiple (4 options A/B/C/D)
+3-4: QuestionOuverte (pas d'options)
+5-6: ListeOuverte (pas d'options)
+7-8: ChoixMultiple (4 options A/B/C/D)
 
 FORMAT JSON STRICT (pas de texte avant/après) :
 [
@@ -87,3 +86,19 @@ def generate_profile_question(user: UtilisateurRead) -> str:
     )
     question = llm.invoke(prompt)
     return question.content
+
+# Remplacer les types pour interdire VraiOuFaux
+ALLOWED_TYPES = [
+    "ChoixMultiple",
+    "QuestionOuverte",
+    "ListeOuverte",
+]
+
+SYSTEM_RULES = {
+    "interdictions": [
+        "INTERDICTION ABSOLUE des questions VraiOuFaux (A/B).",
+        "Ne jamais produire de type 'VraiOuFaux'.",
+    ],
+    "types_autorises": ALLOWED_TYPES,
+    "ratio_min_ouvertes": 0.4,
+}

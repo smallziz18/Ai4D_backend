@@ -118,79 +118,7 @@ class UserService:
             await session.rollback()
             raise Exception(f"Erreur lors de la création de l'utilisateur: {str(e)}")
 
-    @staticmethod
-    async def create_user_with_profile(
-            session: AsyncSession,
-            data: Union[EtudiantCreate, ProfesseurCreate]
-    ):
-        """
-        ANCIENNE MÉTHODE - Crée un utilisateur avec son profil Etudiant/Professeur.
-        ⚠️ DÉPRÉCIÉ: Utilisez create_user() + création du profil après le questionnaire.
-        """
-        try:
-            # L'email est déjà normalisé dans router.py
-            normalized_email = str(data.email).strip().lower()
 
-            # Vérifier si l'email existe déjà (avec l'email normalisé)
-            if await UserService.email_exists(normalized_email, session):
-                raise UserAlreadyExists()
-
-            if await UserService.username_exists(data.username, session):
-                raise UserAlreadyExists()
-
-            # Créer l'utilisateur de base
-            utilisateur = Utilisateur(
-                nom=data.nom,
-                prenom=data.prenom,
-                username=data.username,
-                email=normalized_email,
-                motDePasseHash=generate_password_hash(data.motDePasseHash),
-                status=data.status,
-                created_at=datetime.now(),
-                updated_at=datetime.now()
-            )
-            session.add(utilisateur)
-
-            # Flush pour récupérer l'ID
-            await session.flush()
-
-            # Créer le profil spécifique selon le type
-            if data.status == StatutEnum.PROFESSEUR:
-                professeur = Professeur(
-                    id=utilisateur.id,
-                    niveau_experience=data.niveau_experience,
-                    specialites=data.specialites,
-                    motivation_principale=data.motivation_principale,
-                    niveau_technologique=data.niveau_technologique,
-                )
-                session.add(professeur)
-
-            elif data.status == StatutEnum.ETUDIANT:
-                etudiant = Etudiant(
-                    id=utilisateur.id,
-                    niveau_technique=data.niveau_technique,
-                    competences=data.competences,
-                    objectifs_apprentissage=data.objectifs_apprentissage,
-                    motivation=data.motivation,
-                    niveau_energie=data.niveau_energie,
-                )
-                session.add(etudiant)
-
-            else:
-                raise ValueError(f"Statut utilisateur inconnu: {data.status}")
-
-            # Commit final
-            await session.commit()
-            await session.refresh(utilisateur)
-
-            return utilisateur
-
-        except UserAlreadyExists:
-            await session.rollback()
-            raise
-        except Exception as e:
-            await session.rollback()
-            raise Exception(f"Erreur lors de la création de l'utilisateur: {str(e)}")
 
     @staticmethod
     async def ensure_sql_profile_after_questionnaire(

@@ -19,8 +19,8 @@ RÉSULTATS DU QUIZ:
 
 🎯 MISSION CRITIQUE:
 ⚠️ **PRINCIPE FONDAMENTAL**: Les questions ouvertes (QuestionOuverte, ListeOuverte) sont **LA SOURCE DE VÉRITÉ** pour évaluer le vrai niveau.
-- Un utilisateur qui réussit les QCM/Vrai-Faux mais échoue aux questions ouvertes est un **DÉBUTANT** (niveau 1-3)
-- Un utilisateur qui excelle aux questions ouvertes mais échoue aux QCM a juste fait des erreurs d'inattention (niveau reste élevé)
+- Un utilisateur qui réussit les QCM mais échoue aux questions ouvertes est un **DÉBUTANT** (niveau 1-3)
+- Un utilisateur qui excelle aux questions ouvertes mais échoue aux QCM a pu faire des erreurs d'inattention (niveau reste élevé)
 - **SEULES les questions ouvertes révèlent la vraie compréhension conceptuelle**
 
 Analyse chaque réponse pour identifier:
@@ -52,18 +52,23 @@ Scoring des questions ouvertes:
 
 Calcule la **moyenne des questions ouvertes** (ex: 6.5/10)
 
-**ÉTAPE 2 - ANALYSE DES QCM/VRAI-FAUX (POIDS 30%)**:
-- Score QCM/VF: calcule le % de bonnes réponses
+**ÉTAPE 2 - ANALYSE DES QCM (POIDS 30%)**:
+- Score QCM: calcule le % de bonnes réponses
 - Convertis en note /10
 
 **ÉTAPE 3 - CALCUL FINAL**:
-niveau = (moyenne_questions_ouvertes × 0.7) + (score_qcm_vf × 0.3)
+niveau = (moyenne_questions_ouvertes × 0.7) + (score_qcm × 0.3)
 
 **RÈGLES DE PLAFONNEMENT**:
 - Si moyenne questions ouvertes < 4/10 → niveau MAX = 3 (même avec 100% QCM)
 - Si moyenne questions ouvertes < 6/10 → niveau MAX = 5
 - Si réponses ouvertes vides ou incohérentes → niveau MAX = 2
 - Si moyenne questions ouvertes > 8/10 → niveau MIN = 7 (même avec QCM faibles)
+
+**RÈGLE DE COHÉRENCE AVEC COMPÉTENCES DÉCLARÉES**:
+- Si l'utilisateur déclare des compétences avancées (ex: "CNN", "NLP", "Transformers", "Backpropagation") ET que la moyenne des questions ouvertes ≥ 6/10 → niveau MIN = 5 (intermédiaire)
+- Si compétences très avancées (ex: "Attention Mechanisms", "Transfer Learning") ET moyenne des questions ouvertes ≥ 7/10 → niveau MIN = 7 (avancé)
+- Si compétences avancées mais réponses ouvertes faibles (< 5/10) → ne PAS rehausser le niveau (cohérence prime sur déclaratif)
 
 **EXEMPLES CONCRETS**:
 - QCM: 90%, Questions ouvertes: vides → NIVEAU = 2 (débutant qui devine)

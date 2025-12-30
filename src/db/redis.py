@@ -1,4 +1,5 @@
-import redis.asyncio as redis
+import redis.asyncio as redis_async
+import redis  # Client synchrone pour Celery
 import json
 from typing import List, Optional
 from uuid import UUID
@@ -17,8 +18,15 @@ TOKEN_BLOCKLIST_PREFIX = "token:blocklist:"
 JTI_EXPIRY = 3600  # 1h
 DEFAULT_EXPIRE = 300  # 5 min pour user cache
 
-# --- Redis client ---
-r = redis.from_url(
+# --- Redis clients ---
+# Client asynchrone pour FastAPI/async code
+r = redis_async.from_url(
+    Config.REDIS_URL,
+    decode_responses=True
+)
+
+# Client synchrone pour Celery (important: Celery n'aime pas les coroutines)
+r_sync = redis.from_url(
     Config.REDIS_URL,
     decode_responses=True
 )

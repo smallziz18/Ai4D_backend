@@ -1,5 +1,8 @@
+import asyncio
 from celery import Celery
+import logging
 from asgiref.sync import async_to_sync
+
 from src.mail import create_message, mail
 from src.config import Config
 from types import SimpleNamespace
@@ -20,19 +23,78 @@ app.conf.update(
     result_serializer='json',
     timezone='UTC',
     enable_utc=True,
+    task_soft_time_limit=120,  # 120 secondes soft limit (augmenté pour LLM + roadmap)
+    task_time_limit=180,  # 180 secondes hard limit
+    worker_prefetch_multiplier=1,
+    worker_max_tasks_per_child=1000,
 )
 
-@app.task
-def send_email(recipients, subject, body):
-    """Tâche d'envoi d'email asynchrone"""
+# Logger
+logger = logging.getLogger(__name__)
+
+# Loop utilitaire partagé par le worker Celery
+_worker_loop = None
+
+def _get_worker_loop():
+    """Retourne une boucle event persistante pour éviter les fermetures intempestives."""
+    global _worker_loop
     try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            return loop
+    except RuntimeError:
+        pass
+    if _worker_loop is None or _worker_loop.is_closed():
+        _worker_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(_worker_loop)
+    return _worker_loop
+
+
+@app.task(bind=True, max_retries=3)
+def send_email(self, recipients, subject, body):
+    """
+    Tâche d'envoi d'email asynchrone avec retry.
+    Utilise une approche entièrement asynchrone pour éviter les blocages.
+    """
+    try:
+        import asyncio
+
         message = create_message(recipients, subject, body)
-        async_to_sync(mail.send_message)(message)
-        print(f"sent email to: {recipients}")
+
+        # Créer et exécuter une coroutine
+        async def send_async():
+            return await mail.send_message(message)
+
+        # Essayer d'obtenir la boucle d'événement courante
+        try:
+            loop = asyncio.get_running_loop()
+            # Si on est déjà dans une boucle, cela signifie qu'on est dans un contexte async
+            # Ce ne devrait pas arriver dans une tâche Celery, mais on gère le cas
+            logger.warning("Running loop detected, using asyncio.run may fail")
+        except RuntimeError:
+            # Pas de boucle d'événement actuelle, c'est normal
+            loop = None
+
+        # Exécuter avec asyncio.run qui crée une nouvelle boucle
+        try:
+            asyncio.run(send_async())
+        except Exception as e:
+            logger.error(f"asyncio.run failed: {e}, trying async_to_sync")
+            from asgiref.sync import async_to_sync
+            async_to_sync(send_async)()
+
+        logger.info(f"✅ Email envoyé avec succès à: {recipients}")
         return {"status": "success", "message": f"Email envoyé à {recipients}"}
+
     except Exception as e:
-        print(e)
-        return {"status": "failed", "error": str(e)}
+        logger.error(f"❌ Erreur lors de l'envoi d'email: {str(e)}")
+        # Retry avec backoff exponentiel (2s, 4s, 8s)
+        countdown = min(2 ** self.request.retries, 8)
+        try:
+            raise self.retry(exc=e, countdown=countdown)
+        except self.MaxRetriesExceededError:
+            logger.critical(f"❌ Impossible d'envoyer l'email après {self.max_retries} tentatives: {recipients}")
+            return {"status": "failed", "error": str(e), "max_retries_exceeded": True}
 
 
 def _fallback_question(user: dict) -> str:
@@ -77,18 +139,15 @@ def _clean_json_like(text: str):
     try:
         parsed = json.loads(cleaned)
         return cleaned, parsed
-    except Exception as e1:
+    except Exception:
         pass
 
     # 4. Tenter de trouver un objet JSON ou array dans le texte
-    # Chercher entre { } ou [ ]
     try:
-        # Trouver le premier { ou [
         start_brace = cleaned.find('{')
         start_bracket = cleaned.find('[')
 
         if start_brace != -1 and (start_bracket == -1 or start_brace < start_bracket):
-            # Commencer par {
             depth = 0
             for i in range(start_brace, len(cleaned)):
                 if cleaned[i] == '{':
@@ -100,7 +159,6 @@ def _clean_json_like(text: str):
                         parsed = json.loads(json_str)
                         return json_str, parsed
         elif start_bracket != -1:
-            # Commencer par [
             depth = 0
             for i in range(start_bracket, len(cleaned)):
                 if cleaned[i] == '[':
@@ -111,34 +169,6 @@ def _clean_json_like(text: str):
                         json_str = cleaned[start_bracket:i+1]
                         parsed = json.loads(json_str)
                         return json_str, parsed
-    except Exception as e2:
-        pass
-
-    # 5. Tenter avec unescaping des caractères Unicode
-    try:
-        unescaped = cleaned.encode('utf-8').decode('unicode_escape')
-        parsed = json.loads(unescaped)
-        return unescaped, parsed
-    except Exception:
-        pass
-
-    # 6. Remplacer les guillemets simples par doubles (cas courant)
-    try:
-        # Attention: ceci est un hack et peut causer des problèmes
-        fixed = cleaned.replace("'", '"')
-        parsed = json.loads(fixed)
-        return fixed, parsed
-    except Exception:
-        pass
-
-    # 7. Nettoyer les caractères de contrôle
-    try:
-        # Enlever les caractères de contrôle sauf \n, \r, \t
-        import string
-        printable = set(string.printable)
-        cleaned_chars = ''.join(c for c in cleaned if c in printable)
-        parsed = json.loads(cleaned_chars)
-        return cleaned_chars, parsed
     except Exception:
         pass
 
@@ -147,33 +177,49 @@ def _clean_json_like(text: str):
 
 @app.task(name="chatbot_task", bind=True)
 def chatbot_task(self, user_id: str, session_id: str, message: str, user_context: dict = None):
-    """Tâche async pour le chatbot IA"""
+    """Tâche async pour le chatbot IA - avec event loop propre"""
+    import asyncio
+
     try:
-        from src.ai_agents.agents.chatbot_agent import chatbot_agent
+        # Import à l'intérieur de la tâche pour éviter les effets de bord de fork
+        from src.ai_agents.agents.chatbot_agent import ChatbotAgent
         from src.profile.learning_services import chatbot_service
 
-        # Exécuter le chatbot de manière synchrone
-        response = async_to_sync(chatbot_agent.chat)(
+        # Créer une instance locale (évite partage d'objets non fork-safe)
+        local_agent = ChatbotAgent()
+
+        # Créer un nouvel event loop pour ce worker (évite "Event loop is closed")
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        # Exécuter le chatbot avec le nouvel event loop
+        response = loop.run_until_complete(local_agent.chat(
             user_id=user_id,
             session_id=session_id,
             message=message,
             user_context=user_context
-        )
+        ))
 
         # Sauvegarder dans MongoDB
-        async_to_sync(chatbot_service.add_message)(
+        loop.run_until_complete(chatbot_service.add_message(
             utilisateur_id=user_id,
             session_id=session_id,
             role="user",
             content=message
-        )
+        ))
 
-        async_to_sync(chatbot_service.add_message)(
+        loop.run_until_complete(chatbot_service.add_message(
             utilisateur_id=user_id,
             session_id=session_id,
             role="assistant",
             content=response.get("response", "")
-        )
+        ))
 
         return {
             "status": "success",
@@ -181,52 +227,14 @@ def chatbot_task(self, user_id: str, session_id: str, message: str, user_context
             "task_id": self.request.id
         }
     except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
         print(f"Erreur chatbot_task: {str(e)}")
+        print(f"Traceback complet:\n{error_trace}")
         return {
             "status": "failed",
             "error": str(e),
-            "task_id": self.request.id
-        }
-
-
-@app.task(name="course_generation_task", bind=True)
-def course_generation_task(self, user_id: str, topic: str, user_level: int, duration_weeks: int = 6):
-    """Tâche async pour la génération de cours"""
-    try:
-        from src.ai_agents.agents.course_manager_agent import course_manager_agent
-        from src.profile.learning_services import course_service, progression_service
-
-        # Générer la roadmap
-        roadmap = async_to_sync(course_manager_agent.create_course_roadmap)(
-            course_topic=topic,
-            user_level=user_level,
-            user_objectives="",
-            duration_weeks=duration_weeks
-        )
-
-        # Sauvegarder le cours
-        course_id = async_to_sync(course_service.create_course)(roadmap)
-
-        # Créer la progression
-        async_to_sync(progression_service.create_progression)(
-            utilisateur_id=user_id,
-            course_id=roadmap["cours"]["id"]
-        )
-
-        # Incrémenter les inscriptions
-        async_to_sync(course_service.increment_enrollment)(roadmap["cours"]["id"])
-
-        return {
-            "status": "success",
-            "course_id": course_id,
-            "roadmap": roadmap,
-            "task_id": self.request.id
-        }
-    except Exception as e:
-        print(f"Erreur course_generation_task: {str(e)}")
-        return {
-            "status": "failed",
-            "error": str(e),
+            "traceback": error_trace,
             "task_id": self.request.id
         }
 
@@ -388,40 +396,104 @@ def profile_analysis_task(user_data: dict, evaluation: dict, is_initial: bool = 
             print(f"[PROFILE_ANALYSIS] Processing initial questionnaire...")
 
             # ✅ ÉTAPE 1: Vérifier si le profil MongoDB existe, sinon le créer
-            profile = async_to_sync(profile_service.get_profile_by_user_id)(user_uuid)
+            import asyncio
 
-            if not profile:
-                print(f"[PROFILE_ANALYSIS] Creating MongoDB profile for user {user_uuid}")
-                from src.profile.schema import ProfilCreate
+            async def _create_or_get_profile():
+                profile = await profile_service.get_profile_by_user_id(user_uuid)
 
-                # Créer le profil MongoDB avec les données de base
-                profile_data = ProfilCreate(
-                    utilisateur_id=user_uuid,
-                    niveau=1,  # Niveau par défaut, sera mis à jour par l'analyse
-                    xp=0,
-                    badges=[],
-                    competences=[],
-                    energie=5
+                if not profile:
+                    print(f"[PROFILE_ANALYSIS] Creating MongoDB profile for user {user_uuid}")
+                    from src.profile.schema import ProfilCreate
+
+                    # Déterminer le niveau initial à partir du LLM ou fallback
+                    initial_level = 1
+                    initial_label = "débutant"
+                    try:
+                        if llm_analysis and isinstance(llm_analysis, dict):
+                            lvl = int(llm_analysis.get("niveau", 0) or 0)
+                            if 1 <= lvl <= 10:
+                                initial_level = lvl
+                                initial_label = llm_analysis.get("niveau_reel") or ("débutant" if lvl < 4 else "intermédiaire" if lvl < 7 else "avancé")
+                        else:
+                            # Fallback simple basé sur évaluation (score sur questions ouvertes si fourni)
+                            quiz = evaluation or {}
+                            score_open = quiz.get("score_questions_ouvertes") or 0
+                            score_qcm = quiz.get("score_qcm") or 0
+                            computed = round((score_open * 0.7 + score_qcm * 0.3))
+                            if 1 <= computed <= 10:
+                                initial_level = max(3, computed)  # ne pas afficher 1 si score élevé
+                                initial_label = "débutant" if initial_level < 4 else "intermédiaire" if initial_level < 7 else "avancé"
+                    except Exception:
+                        pass
+
+                    # Créer le profil MongoDB avec les données de base
+                    profile_data = ProfilCreate(
+                        utilisateur_id=user_uuid,
+                        niveau=initial_level,
+                        xp=0,
+                        badges=[],
+                        competences=[],
+                        energie=5
+                    )
+
+                    try:
+                        profile = await profile_service.create_profile(profile_data)
+                        print(f"[PROFILE_ANALYSIS] MongoDB profile created: {profile.id}")
+                    except Exception as e:
+                        print(f"[PROFILE_ANALYSIS] Error creating profile: {e}")
+                        profile = await profile_service.get_profile_by_user_id(user_uuid)
+                        if not profile:
+                            raise Exception(f"Failed to create profile for user {user_uuid}: {e}")
+                else:
+                    print(f"[PROFILE_ANALYSIS] MongoDB profile already exists: {profile.id}")
+
+                return profile
+
+            async def _save_questionnaire(profile):
+                # ✅ ÉTAPE 2: Sauvegarder le questionnaire initial avec l'analyse LLM
+                updated_profile = await profile_service.save_initial_questionnaire(
+                    user_uuid,
+                    evaluation,
+                    analyse_llm=llm_analysis
                 )
-
+                # Mettre à jour le niveau et son libellé à partir de l’analyse LLM si disponible
                 try:
-                    profile = async_to_sync(profile_service.create_profile)(profile_data)
-                    print(f"[PROFILE_ANALYSIS] MongoDB profile created: {profile.id}")
-                except Exception as e:
-                    print(f"[PROFILE_ANALYSIS] Error creating profile: {e}")
-                    # Réessayer de récupérer au cas où il a été créé entre-temps
-                    profile = async_to_sync(profile_service.get_profile_by_user_id)(user_uuid)
-                    if not profile:
-                        raise Exception(f"Failed to create profile for user {user_uuid}: {e}")
-            else:
-                print(f"[PROFILE_ANALYSIS] MongoDB profile already exists: {profile.id}")
+                    update_fields = {}
+                    if llm_analysis and isinstance(llm_analysis, dict):
+                        lvl = llm_analysis.get("niveau")
+                        if isinstance(lvl, (int, float)):
+                            lvl = int(lvl)
+                            if 1 <= lvl <= 10:
+                                update_fields["niveau"] = lvl
+                        label = llm_analysis.get("niveau_reel")
+                        if isinstance(label, str) and label:
+                            update_fields["niveau_reel"] = label
+                    if update_fields:
+                        await profile_service.collection.update_one(
+                            {"utilisateur_id": str(user_uuid)},
+                            {"$set": update_fields}
+                        )
+                        # Recharger
+                        updated_profile = await profile_service.get_profile_by_user_id(user_uuid)
+                except Exception as _e:
+                    print(f"[PROFILE_ANALYSIS] Warning: could not update level from LLM analysis: {_e}")
+                return updated_profile
 
-            # ✅ ÉTAPE 2: Sauvegarder le questionnaire initial avec l'analyse LLM
-            updated_profile = async_to_sync(profile_service.save_initial_questionnaire)(
-                user_uuid,
-                evaluation,
-                analyse_llm=llm_analysis
-            )
+            # Exécuter les opérations asynchrones dans une boucle d'événements isolée
+            loop = None
+            try:
+                # Créer une NOUVELLE boucle pour éviter les conflits de session
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+
+                profile = loop.run_until_complete(_create_or_get_profile())
+                updated_profile = loop.run_until_complete(_save_questionnaire(profile))
+            except Exception as e:
+                print(f"[PROFILE_ANALYSIS] Async operation failed: {e}")
+                raise
+            finally:
+                # Ne pas fermer la boucle ici, on en aura besoin plus bas
+                pass
 
             # ✅ ÉTAPE 3: Créer le profil SQL Etudiant/Professeur après questionnaire (si absent)
             try:
@@ -439,11 +511,23 @@ def profile_analysis_task(user_data: dict, evaluation: dict, is_initial: bool = 
                 # fallback depuis evaluation
                 if isinstance(evaluation, dict):
                     details.setdefault('competences', [])
-                async_to_sync(_UserSvc.ensure_sql_profile_after_questionnaire)(
-                    user_uuid,
-                    status_enum,
-                    details
-                )
+
+                # Utiliser une NOUVELLE boucle pour SQLAlchemy async
+                async def _ensure_sql_profile():
+                    await _UserSvc.ensure_sql_profile_after_questionnaire(
+                        user_uuid,
+                        status_enum,
+                        details
+                    )
+
+                # Utiliser une boucle isolée pour éviter les conflits SQLAlchemy
+                sql_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(sql_loop)
+                try:
+                    sql_loop.run_until_complete(_ensure_sql_profile())
+                finally:
+                    sql_loop.close()
+
             except Exception as e:
                 print(f"[PROFILE_ANALYSIS] Warning: could not ensure SQL profile: {e}")
 
@@ -460,18 +544,123 @@ def profile_analysis_task(user_data: dict, evaluation: dict, is_initial: bool = 
                     "💪 Pratique régulièrement pour progresser"
                 ])
 
-            # Mettre à jour les recommandations dans le profil
-            async_to_sync(profile_service.collection.update_one)(
-                {"utilisateur_id": str(user_uuid)},
-                {"$set": {"recommandations": recommendations}}
-            )
+            # Mettre à jour les recommandations dans le profil (réutiliser la même boucle)
+            async def _update_recommendations():
+                await profile_service.collection.update_one(
+                    {"utilisateur_id": str(user_uuid)},
+                    {"$set": {"recommandations": recommendations}}
+                )
+
+            try:
+                if loop and not loop.is_closed():
+                    loop.run_until_complete(_update_recommendations())
+                else:
+                    # Créer une nouvelle boucle si nécessaire
+                    temp_loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(temp_loop)
+                    try:
+                        temp_loop.run_until_complete(_update_recommendations())
+                    finally:
+                        temp_loop.close()
+            except Exception as e:
+                print(f"[PROFILE_ANALYSIS] Warning: failed to update recommendations: {e}")
 
             # Recharger le profil
-            updated_profile = async_to_sync(profile_service.get_profile_by_user_id)(user_uuid)
+            async def _reload_profile():
+                return await profile_service.get_profile_by_user_id(user_uuid)
+
+            try:
+                if loop and not loop.is_closed():
+                    updated_profile = loop.run_until_complete(_reload_profile())
+                else:
+                    # Créer une nouvelle boucle si nécessaire
+                    temp_loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(temp_loop)
+                    try:
+                        updated_profile = temp_loop.run_until_complete(_reload_profile())
+                    finally:
+                        temp_loop.close()
+            except Exception as e:
+                print(f"[PROFILE_ANALYSIS] Warning: failed to reload profile: {e}")
+                # Utiliser le profil de l'étape 2
+                pass
 
             prof_dict = updated_profile.model_dump() if hasattr(updated_profile, 'model_dump') else getattr(updated_profile, '__dict__', None)
 
             print(f"[PROFILE_ANALYSIS] Initial questionnaire saved successfully")
+
+            # ✅ ÉTAPE 4: Générer la roadmap initiale en asynchrone (boucle isolée + timeout)
+            print(f"[PROFILE_ANALYSIS] Generating initial roadmap based on profile...")
+            roadmap = None
+            try:
+                from src.profile.roadmap_services import RoadmapService
+
+                async def _generate_initial_roadmap():
+                    roadmap_service = RoadmapService()
+                    return await asyncio.wait_for(
+                        roadmap_service.create_and_save_roadmap(
+                            user_id=user_uuid,
+                            profil=updated_profile,
+                            duration_weeks=12,
+                            force_regenerate=True
+                        ),
+                        timeout=60.0
+                    )
+
+                # Boucle isolée dédiée à la roadmap
+                roadmap_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(roadmap_loop)
+                try:
+                    roadmap = roadmap_loop.run_until_complete(_generate_initial_roadmap())
+                    print(f"[PROFILE_ANALYSIS] Initial roadmap generated successfully")
+                finally:
+                    roadmap_loop.close()
+            except asyncio.TimeoutError:
+                print(f"[PROFILE_ANALYSIS] Warning: Roadmap generation timed out (>60s), continuing without it")
+            except Exception as e:
+                print(f"[PROFILE_ANALYSIS] Warning: Failed to generate initial roadmap: {e}")
+
+
+            # ✅ Nettoyer les caches/questionnaires pour ce user afin d'éviter de réafficher d'anciens résultats
+            try:
+                from src.db.redis import r_sync as redis_client
+
+                # Utiliser uniquement des appels synchrones Redis
+                pattern = f"questionnaire:{user_uuid}:*"
+                keys = redis_client.keys(pattern)
+                if keys:
+                    redis_client.delete(*keys)
+                # Nettoyer un cache éventuel de profil/questionnaire
+                redis_client.delete(f"profile:{user_uuid}")
+                redis_client.delete(f"questionnaire_result:{user_uuid}")
+                print(f"[PROFILE_ANALYSIS] Cache cleared for user {user_uuid}")
+            except Exception as cache_err:
+                print(f"[PROFILE_ANALYSIS] Warning: cache clear failed: {cache_err}")
+
+            # ✅ ÉTAPE 5: S'assurer que le flag questionnaire_initial_complete est bien à True
+            async def _ensure_questionnaire_flag():
+                try:
+                    # Forcer une dernière mise à jour pour garantir que le flag est bien enregistré
+                    await profile_service.collection.update_one(
+                        {"utilisateur_id": str(user_uuid)},
+                        {"$set": {"questionnaire_initial_complete": True}}
+                    )
+                    print(f"[PROFILE_ANALYSIS] Ensured questionnaire_initial_complete flag is True for user {user_uuid}")
+                except Exception as flag_err:
+                    print(f"[PROFILE_ANALYSIS] Warning: could not ensure questionnaire_initial_complete flag: {flag_err}")
+
+            try:
+                if loop and not loop.is_closed():
+                    loop.run_until_complete(_ensure_questionnaire_flag())
+                else:
+                    temp_loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(temp_loop)
+                    try:
+                        temp_loop.run_until_complete(_ensure_questionnaire_flag())
+                    finally:
+                        temp_loop.close()
+            except Exception as e:
+                print(f"[PROFILE_ANALYSIS] Warning: failed to ensure questionnaire flag: {e}")
 
             return {
                 "ok": True,
@@ -481,19 +670,31 @@ def profile_analysis_task(user_data: dict, evaluation: dict, is_initial: bool = 
                 "analyse_questions_ouvertes": updated_profile.analyse_questions_ouvertes,
                 "recommendations": recommendations,
                 "llm_analysis": llm_analysis,
+                "roadmap_generated": roadmap is not None,
+                "roadmap": roadmap if roadmap else None,
             }
 
         else:
             # QUIZ NORMAL - Gamification complète
             print(f"[PROFILE_ANALYSIS] Processing normal quiz with gamification...")
+            import asyncio
 
             time_taken = evaluation.get("time_taken_seconds")
 
-            result = async_to_sync(profile_service.analyze_quiz_and_update_profile)(
-                user_uuid,
-                evaluation,
-                time_taken_seconds=time_taken
-            )
+            async def _analyze_quiz():
+                return await profile_service.analyze_quiz_and_update_profile(
+                    user_uuid,
+                    evaluation,
+                    time_taken_seconds=time_taken
+                )
+
+            # Créer une NOUVELLE boucle pour éviter les conflits
+            quiz_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(quiz_loop)
+            try:
+                result = quiz_loop.run_until_complete(_analyze_quiz())
+            finally:
+                pass  # Ne pas fermer immédiatement
 
             print(f"[PROFILE_ANALYSIS] Gamification complete. XP earned: {result['xp_earned']['total_xp']}")
             print(f"[PROFILE_ANALYSIS] Badges earned: {result['badges_earned']}")
@@ -510,10 +711,21 @@ def profile_analysis_task(user_data: dict, evaluation: dict, is_initial: bool = 
                 result["llm_analysis"] = llm_analysis
 
                 # Mettre à jour les recommandations dans MongoDB
-                async_to_sync(profile_service.collection.update_one)(
-                    {"utilisateur_id": str(user_uuid)},
-                    {"$set": {"recommandations": result["recommendations"]}}
-                )
+                async def _update_recommendations():
+                    await profile_service.collection.update_one(
+                        {"utilisateur_id": str(user_uuid)},
+                        {"$set": {"recommandations": result["recommendations"]}}
+                    )
+
+                try:
+                    quiz_loop.run_until_complete(_update_recommendations())
+                except Exception as e:
+                    print(f"[PROFILE_ANALYSIS] Warning: failed to update quiz recommendations: {e}")
+                finally:
+                    quiz_loop.close()
+            else:
+                quiz_loop.close()
+
 
             # Formatter le profil pour la réponse
             prof_dict = result["profile"].model_dump() if hasattr(result["profile"], 'model_dump') else getattr(result["profile"], '__dict__', None)
@@ -563,7 +775,7 @@ def chatbot_streaming_task(self, user_id: str, session_id: str, message: str):
         Dict avec la réponse complète et les métadonnées
     """
     from openai import OpenAI
-    from src.db.redis import r as redis_client
+    from src.db.redis import r_sync as redis_client
     from src.profile.services import profile_service
     from src.profile.learning_services import chatbot_service
     from src.ai_agents.agents.chatbot_agent import CHATBOT_SYSTEM_PROMPT
@@ -764,5 +976,97 @@ PROFIL APPRENANT :
             "status": "error",
             "error": error_msg,
             "task_id": task_id
+        }
+
+
+# ==================== COURSE GENERATION (ASYNC) ====================
+
+@app.task(name="generate_course_roadmap_task")
+def generate_course_roadmap_task(user_id: str, course_topic: str, user_level: int, user_objectives: str, duration_weeks: int):
+    """
+    Tâche Celery pour générer une roadmap de cours personnalisée.
+
+    Cette approche permet:
+    - Réponse FastAPI immédiate (non bloquée)
+    - Génération asynchrone de la roadmap en arrière-plan
+    - Économie de ressources serveur
+
+    Args:
+        user_id: ID de l'utilisateur
+        course_topic: Sujet du cours
+        user_level: Niveau de l'utilisateur
+        user_objectives: Objectifs d'apprentissage
+        duration_weeks: Durée en semaines
+
+    Returns:
+        Dict avec la roadmap générée et cours créé
+    """
+    try:
+        import asyncio
+        from src.ai_agents.agents.course_manager_agent import course_manager_agent
+        from src.profile.learning_services import course_service
+        from src.profile.learning_services import progression_service
+        from uuid import UUID as _UUID
+
+        user_uuid = _UUID(str(user_id))
+
+        print(f"[COURSE_GENERATION] Starting roadmap generation for user {user_id}")
+        print(f"[COURSE_GENERATION] Topic: {course_topic}, Level: {user_level}, Weeks: {duration_weeks}")
+
+        # Créer une nouvelle boucle d'événements pour cette opération async
+        async def _generate_roadmap():
+            # Générer la roadmap avec l'agent IA
+            print(f"[COURSE_GENERATION] Calling course_manager_agent...")
+            roadmap = await course_manager_agent.create_course_roadmap(
+                course_topic=course_topic,
+                user_level=user_level,
+                user_objectives=user_objectives,
+                duration_weeks=duration_weeks
+            )
+            print(f"[COURSE_GENERATION] Roadmap generated: {roadmap.get('titre')}")
+
+            # Sauvegarder le cours dans MongoDB
+            print(f"[COURSE_GENERATION] Saving course to MongoDB...")
+            course_id = await course_service.create_course(roadmap)
+            print(f"[COURSE_GENERATION] Course created with ID: {course_id}")
+
+            # Créer la progression pour l'utilisateur
+            print(f"[COURSE_GENERATION] Creating progression...")
+            await progression_service.create_progression(
+                utilisateur_id=user_uuid,
+                course_id=roadmap["cours"]["id"]
+            )
+
+            # Incrémenter les inscriptions
+            print(f"[COURSE_GENERATION] Incrementing enrollment...")
+            await course_service.increment_enrollment(roadmap["cours"]["id"])
+
+            return {
+                "course_id": course_id,
+                "roadmap": roadmap
+            }
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result = loop.run_until_complete(_generate_roadmap())
+        finally:
+            loop.close()
+
+        print(f"[COURSE_GENERATION] Roadmap generation completed successfully")
+
+        return {
+            "ok": True,
+            "course_id": result["course_id"],
+            "roadmap": result["roadmap"]
+        }
+
+    except Exception as e:
+        print(f"[COURSE_GENERATION] Task failed with error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "ok": False,
+            "error": str(e)
         }
 

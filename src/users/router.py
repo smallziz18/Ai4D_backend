@@ -190,7 +190,7 @@ async def get_all_users(
 # --- CREATE user ---
 @user_router.post("/signup", status_code=status.HTTP_201_CREATED)
 async def create_user(
-        bgtask: BackgroundTasks,
+        background_tasks: BackgroundTasks,
         data: UtilisateurCreateBase,
         session: AsyncSession = Depends(get_session),
 ):
@@ -231,8 +231,7 @@ async def create_user(
         # Revalider via le schéma pour conserver EmailStr
         data = UtilisateurCreateBase(**{**data.model_dump(), "email": normalized_email})
 
-        # ✅ CHANGEMENT: create_user crée maintenant UNIQUEMENT l'utilisateur de base
-        # Le profil Etudiant/Professeur sera créé après le questionnaire
+        # ✅ Créer l'utilisateur de base
         user = await user_service.create_user(session, data)
         user_data = UtilisateurRead.model_validate(user, from_attributes=True)
 
@@ -253,15 +252,19 @@ async def create_user(
             verification_link=verification_link
         )
 
-        email = [normalized_email]
-        subject = "🚀 Vérifiez votre compte AI4D"
-        send_email.delay(email, subject, html_message)
+        # Envoyer l'email de vérification via Celery (asynchrone, ne bloque pas)
+        send_email.delay([normalized_email], "🚀 Vérifiez votre compte AI4D", html_message)
 
-        try:
-            await set_user_cache(user_data)
-            await invalidate_all_users_cache()
-        except Exception as e:
-            logger.warning(f"Redis unavailable during user cache update: {e}")
+        # Mettre à jour le cache en arrière-plan
+        async def update_cache():
+            try:
+                await set_user_cache(user_data)
+                await invalidate_all_users_cache()
+                logger.info(f"User cache updated for: {user_data.id}")
+            except Exception as e:
+                logger.warning(f"Redis unavailable during user cache update: {e}")
+
+        background_tasks.add_task(update_cache)
 
         logger.info(f"User created with verification token: {user_data.id}")
         return {

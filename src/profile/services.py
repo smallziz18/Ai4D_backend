@@ -530,7 +530,19 @@ class ProfileService:
         """
         profile = await self.get_profile_by_user_id(user_id)
         if not profile:
-            raise ValueError("Profile not found")
+            # ✅ Créer automatiquement le profil s'il est manquant
+            from src.profile.schema import ProfilCreate
+            profil_data = ProfilCreate(
+                utilisateur_id=user_id,
+                niveau=1,
+                xp=0,
+                badges=[],
+                competences=[],
+                energie=5,
+                recommandations=[],
+                analyse_detaillee={}
+            )
+            profile = await self.create_profile(profil_data)
 
         # Vérifier si le questionnaire a déjà été fait
         if profile.questionnaire_initial_complete:

@@ -216,22 +216,18 @@ async def get_agent_task_status(
 
 # ==================== CHATBOT ====================
 
-@ai_router.post("/chat", response_model=ChatMessageResponse, deprecated=True)
+@ai_router.post("/chat", response_model=ChatMessageResponse)
 async def chat_with_bot(
     request: ChatMessageRequest,
     current_user: User = Depends(get_current_user)
 ):
     """
-    ⚠️ DEPRECATED - Utilisez WebSocket /api/ai/v1/realtime/chat/{user_id} pour streaming temps réel
+    Converser avec le chatbot IA (mode synchrone).
 
-    Converser avec le chatbot IA (version synchrone - NON SCALABLE).
-
-    Cette route bloque le serveur pendant 3-5 secondes.
-    Pour une architecture scalable avec streaming, utilisez :
+    Note: cette route est synchrone et peut prendre ~3-5 secondes.
+    Pour du streaming temps réel/scalable, vous pouvez aussi utiliser :
     - WebSocket: ws://127.0.0.1:8000/api/ai/v1/realtime/chat/{user_id}
     - Async REST: POST /api/ai/v1/realtime/chat/start
-
-    Voir WEBSOCKET_IMPLEMENTATION.md pour les détails.
     """
     try:
         # Récupérer le profil utilisateur pour le contexte
@@ -499,13 +495,15 @@ async def complete_module(
             )
 
             # Gagner XP et badge
-            if profil := await profile_service.get_profile_by_user_id(current_user.id):
+            profil = await profile_service.get_profile_by_user_id(current_user.id)
+            if profil:
                 await profile_service.add_xp(
                     current_user.id,
                     validation_result.get("xp_gained", 200)
                 )
 
-                if badge := validation_result.get("badge_earned"):
+                badge = validation_result.get("badge_earned")
+                if badge:
                     await profile_service.add_badge(current_user.id, badge)
 
         return validation_result
@@ -541,7 +539,8 @@ async def complete_lesson(
             )
 
             # Gagner un peu d'XP
-            if profil := await profile_service.get_profile_by_user_id(current_user.id):
+            profil = await profile_service.get_profile_by_user_id(current_user.id)
+            if profil:
                 await profile_service.add_xp(current_user.id, 10)
 
         return {
@@ -920,5 +919,261 @@ async def create_learning_roadmap(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Erreur création roadmap: {str(e)}"
+        )
+
+
+@ai_router.get("/recommendations/my-roadmap")
+async def get_my_personalized_roadmap(
+    duration_weeks: int = 12,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Génère automatiquement une roadmap personnalisée basée sur votre profil.
+
+    Cette route analyse votre profil complet (niveau, compétences, objectifs, faiblesses)
+    et crée une roadmap sur mesure avec :
+    - ✅ Étapes progressives adaptées à votre niveau
+    - 📹 Vidéos YouTube recommandées (Machine Learnia, 3Blue1Brown, etc.)
+    - 🎓 Cours en ligne gratuits (Coursera, edX, OpenClassrooms)
+    - 💻 Projets GitHub pour pratiquer
+    - 📊 Critères de validation pour chaque étape
+
+    Args:
+        duration_weeks: Durée souhaitée en semaines (4-52)
+
+    Returns:
+        Roadmap complète avec toutes les ressources
+    """
+    try:
+        # Récupérer le profil complet
+        profil = await profile_service.get_profile_by_user_id(current_user.id)
+
+        if not profil:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Profil non trouvé. Complétez d'abord le questionnaire de profilage."
+            )
+
+        # Construire les objectifs à partir du profil
+        if profil.objectifs:
+            objectives = profil.objectifs
+        else:
+            # Objectifs par défaut basés sur le niveau
+            if profil.niveau <= 3:
+                objectives = "Maîtriser les fondamentaux du Machine Learning et faire mes premiers projets"
+            elif profil.niveau <= 6:
+                objectives = "Approfondir mes connaissances en Deep Learning et réaliser des projets avancés"
+            else:
+                objectives = "Me spécialiser dans les architectures modernes (Transformers, LLM) et contribuer à la recherche"
+
+        # Extraire les faiblesses pour les prioriser dans la roadmap
+        weaknesses_context = ""
+        if hasattr(profil, 'analyse_questions_ouvertes') and profil.analyse_questions_ouvertes:
+            weaknesses = []
+
+            # Gérer le cas où analyse_questions_ouvertes peut être un dict ou une liste
+            analyses = profil.analyse_questions_ouvertes
+            if isinstance(analyses, dict):
+                analyses = [analyses]
+            elif not isinstance(analyses, list):
+                analyses = []
+
+            for analysis in analyses:
+                # Vérifier que analysis est un dictionnaire
+                if isinstance(analysis, dict):
+                    score = analysis.get('score_moyen', 10)
+                    # S'assurer que score est un nombre
+                    try:
+                        score = float(score)
+                        if score < 6:
+                            concept = analysis.get('concept_principal', '')
+                            if concept:
+                                weaknesses.append(concept)
+                    except (TypeError, ValueError):
+                        # Ignorer si le score n'est pas convertible
+                        continue
+
+            if weaknesses:
+                weaknesses_context = f"\n\n⚠️ PRIORITÉS (faiblesses identifiées) : {', '.join(weaknesses[:5])}"
+                objectives += weaknesses_context
+
+        # Générer la roadmap personnalisée
+        roadmap = await course_recommendation_agent.create_learning_roadmap(
+            user_level=profil.niveau,
+            user_objectives=objectives,
+            user_competences=profil.competences if profil.competences else [],
+            duration_weeks=duration_weeks
+        )
+
+        # Enrichir avec des infos du profil
+        roadmap["profil_utilisateur"] = {
+            "niveau": profil.niveau,
+            "xp": profil.xp,
+            "badges": profil.badges,
+            "competences_actuelles": profil.competences,
+            "energie_actuelle": profil.energie,
+            "objectifs": profil.objectifs
+        }
+
+        # Ajouter des statistiques
+        roadmap["statistiques"] = {
+            "total_ressources": (
+                len(roadmap.get("ressources_supplementaires", {}).get("videos_youtube", [])) +
+                len(roadmap.get("ressources_supplementaires", {}).get("cours_en_ligne", [])) +
+                len(roadmap.get("ressources_supplementaires", {}).get("projets_github", []))
+            ),
+            "duree_totale_estimee": f"{duration_weeks} semaines",
+            "niveau_cible": min(10, profil.niveau + 2),
+            "gratuite": True
+        }
+
+        return {
+            "status": "success",
+            "message": f"🎯 Roadmap personnalisée créée pour {duration_weeks} semaines !",
+            "roadmap": roadmap
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erreur génération roadmap: {str(e)}"
+        )
+
+
+@ai_router.post("/chat/generate-roadmap")
+async def chat_generate_roadmap_command(
+    request: ChatMessageRequest,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Commande spéciale du chatbot pour générer une roadmap via conversation naturelle.
+
+    L'utilisateur peut dire :
+    - "Génère-moi une roadmap"
+    - "Je veux un plan d'apprentissage"
+    - "Crée mon parcours personnalisé"
+
+    Le chatbot comprend l'intention et génère la roadmap automatiquement.
+    """
+    try:
+        message_lower = request.message.lower()
+
+        # Détecter l'intention de génération de roadmap
+        roadmap_keywords = [
+            "roadmap", "plan d'apprentissage", "parcours", "feuille de route",
+            "programme", "planning", "organisation", "étapes", "progression"
+        ]
+
+        is_roadmap_request = any(keyword in message_lower for keyword in roadmap_keywords)
+
+        if not is_roadmap_request:
+            # Si ce n'est pas une demande de roadmap, traiter comme un message normal
+            return await chat_with_bot(request, current_user)
+
+        # Générer la roadmap automatiquement
+        profil = await profile_service.get_profile_by_user_id(current_user.id)
+
+        if not profil:
+            return {
+                "response": "Pour créer une roadmap personnalisée, je dois d'abord connaître ton profil. Peux-tu compléter le questionnaire de profilage ? 📝",
+                "intention": {
+                    "primary": "roadmap_request",
+                    "confidence": 0.9,
+                    "action_required": "complete_profile"
+                },
+                "conversation_id": f"chat_{current_user.id}",
+                "timestamp": datetime.now(UTC).isoformat(),
+                "suggestions": [
+                    "📝 Compléter le questionnaire",
+                    "💬 Poser une question",
+                    "📚 Voir les cours disponibles"
+                ]
+            }
+
+        # Extraire la durée si mentionnée
+        duration_weeks = 12  # Par défaut
+        import re
+        week_match = re.search(r'(\d+)\s*(semaine|week)', message_lower)
+        if week_match:
+            duration_weeks = min(52, max(4, int(week_match.group(1))))
+
+        # Générer la roadmap
+        objectives = profil.objectifs or "Progresser en Machine Learning et Deep Learning"
+        roadmap = await course_recommendation_agent.create_learning_roadmap(
+            user_level=profil.niveau,
+            user_objectives=objectives,
+            user_competences=profil.competences or [],
+            duration_weeks=duration_weeks
+        )
+
+        # Construire une réponse conversationnelle
+        response_text = f"""🎯 **Roadmap personnalisée créée !**
+
+J'ai généré un parcours de {duration_weeks} semaines adapté à ton niveau ({profil.niveau}/10).
+
+**📊 Résumé** :
+"""
+
+        if "roadmap_suggeree" in roadmap and roadmap["roadmap_suggeree"]:
+            response_text += f"\n📍 **{len(roadmap['roadmap_suggeree'])} étapes principales**"
+            for i, etape in enumerate(roadmap["roadmap_suggeree"][:3], 1):
+                response_text += f"\n  {i}. {etape.get('titre', f'Étape {i}')} ({etape.get('duree_totale', 'durée variable')})"
+            if len(roadmap["roadmap_suggeree"]) > 3:
+                response_text += f"\n  ... et {len(roadmap['roadmap_suggeree']) - 3} autres étapes"
+
+        if "ressources_supplementaires" in roadmap:
+            supp = roadmap["ressources_supplementaires"]
+            response_text += f"\n\n**📚 Ressources incluses** :"
+            response_text += f"\n  📹 {len(supp.get('videos_youtube', []))} vidéos YouTube"
+            response_text += f"\n  🎓 {len(supp.get('cours_en_ligne', []))} cours en ligne gratuits"
+            response_text += f"\n  💻 {len(supp.get('projets_github', []))} projets GitHub"
+
+        response_text += "\n\n✅ Toutes les ressources sont **100% gratuites** !"
+        response_text += "\n\n👉 Consulte le détail complet dans la section 'roadmap' de la réponse."
+
+        session_id = request.session_id or f"chat_{current_user.id}_{datetime.now(UTC).timestamp()}"
+
+        # Sauvegarder dans l'historique
+        await chatbot_service.add_message(
+            utilisateur_id=current_user.id,
+            session_id=session_id,
+            role="user",
+            content=request.message
+        )
+
+        await chatbot_service.add_message(
+            utilisateur_id=current_user.id,
+            session_id=session_id,
+            role="assistant",
+            content=response_text
+        )
+
+        return {
+            "response": response_text,
+            "intention": {
+                "primary": "roadmap_generated",
+                "confidence": 1.0,
+                "duration_weeks": duration_weeks
+            },
+            "conversation_id": session_id,
+            "timestamp": datetime.now(UTC).isoformat(),
+            "suggestions": [
+                "📖 Voir plus de détails",
+                "🎯 Modifier la durée",
+                "💬 Poser une question"
+            ],
+            "roadmap": roadmap  # Roadmap complète dans la réponse
+        }
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erreur génération roadmap: {str(e)}"
         )
 

@@ -366,7 +366,11 @@ Retourne un JSON :
             "next_step": "recommendation"
         }
 
+    def __call__(self, state: AgentState) -> Dict[str, Any]:
+        """Permet d'utiliser l'agent comme une fonction (requis par LangGraph)."""
+        import asyncio
+        return asyncio.run(self.tutor(state))
+
 
 # Instance globale
 tutoring_agent = TutoringAgent()
-
