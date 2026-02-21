@@ -1,3 +1,5 @@
+from typing import Any, AsyncGenerator, Union
+
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy.pool import NullPool
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -18,14 +20,30 @@ async_session = async_sessionmaker(
     class_=AsyncSession,
     expire_on_commit=False,
     autoflush=False,
+    autocommit=False,
 )
 
 
-async def get_session() -> AsyncSession:
-    async with async_session() as session:
-        try:
-            yield session
+async def get_session() -> AsyncGenerator[Union[AsyncSession, Any], Any]:
+    """
+    Générateur de session async avec gestion propre des erreurs.
+    Utilisé comme dependency dans FastAPI.
+    """
+    session = async_session()
+    try:
+        yield session
+        # Commit si pas d'erreur
+        if session.in_transaction():
             await session.commit()
-        except Exception:
+    except Exception as e:
+        # Rollback en cas d'erreur
+        if session.in_transaction():
             await session.rollback()
-            raise
+        raise
+    finally:
+        # Fermeture sécurisée de la session
+        try:
+            await session.close()
+        except Exception:
+            # Ignorer les erreurs de fermeture si la session est déjà fermée ou en état invalide
+            pass

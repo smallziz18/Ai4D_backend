@@ -14,6 +14,20 @@ class StatutUtilisateur(str, Enum):
     Administrateur = "Administrateur"
 
 
+class Domaine(str, Enum):
+    INFORMATIQUE = "Informatique"
+    DATA_SCIENCE = "Data Science"
+    DROIT = "Droit"
+    MARKETING = "Marketing"
+    CHIMIE = "Chimie"
+    PHYSIQUE = "Physique"
+    MEDECINE = "Médecine"
+    BIOLOGIE = "Biologie"
+    ECONOMIE = "Économie"
+    MANAGEMENT = "Management"
+    GENERAL = "Général"
+
+
 class UtilisateurBase(SQLModel):
     nom: str = Field(nullable=False)
     prenom: str = Field(nullable=False)
@@ -69,9 +83,15 @@ class Professeur(SQLModel, table=True):
         )
     )
 
-
     utilisateur: Utilisateur = Relationship(back_populates="professeur")
 
+    domaine: Domaine = Field(
+        sa_column=Column(
+            pg.ENUM(Domaine, name="domaine", create_type=True),
+            nullable=False,
+            default=Domaine.GENERAL
+        )
+    )
     niveau_experience: int = Field(ge=0, le=30, description="Années d'expérience pédagogique")
     specialites: List[str] = Field(
         sa_column=Column(pg.ARRAY(pg.TEXT)), default_factory=list, description="Domaines d'expertise"
@@ -94,6 +114,13 @@ class Etudiant(SQLModel, table=True):
 
     utilisateur: Utilisateur = Relationship(back_populates="etudiant")
 
+    domaine: Domaine = Field(
+        sa_column=Column(
+            pg.ENUM(Domaine, name="domaine", create_type=True),
+            nullable=False,
+            default=Domaine.GENERAL
+        )
+    )
     niveau_technique: int = Field(ge=1, le=10)
     competences: List[str] = Field(
         sa_column=Column(pg.ARRAY(pg.TEXT)), default_factory=list

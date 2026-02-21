@@ -4,44 +4,13 @@ Stocké dans PostgreSQL pour persistence et dans Redis pour performance.
 """
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone
-from sqlalchemy import create_engine, Column, String, JSON, DateTime, Integer
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
-import uuid
 import json as json_lib
 
 from src.config import Config
 from src.db.redis import r as redis_client
-
-Base = declarative_base()
-
-
-class AgentContext(Base):
-    """
-    Contexte partagé entre tous les agents.
-    Stocke l'historique des interactions, décisions et états.
-    """
-    __tablename__ = "agent_contexts"
-
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id = Column(String, nullable=False, index=True)
-    session_id = Column(String, nullable=False, index=True)
-
-    # Contexte actuel (état du workflow)
-    current_state = Column(String, default="idle")
-    current_agent = Column(String, nullable=True)
-
-    # Données contextuelles
-    context_data = Column(JSON, default={})
-    conversation_history = Column(JSON, default=[])
-
-    # Métriques et suivi
-    total_interactions = Column(Integer, default=0)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-
-    # Métadonnées (renommé pour éviter conflit avec SQLAlchemy)
-    meta_data = Column(JSON, default={})
+from src.ai_agents.models import AgentContext
 
 
 class SharedContextService:
@@ -51,17 +20,12 @@ class SharedContextService:
         # Utiliser une URL synchrone pour SQLAlchemy classique
         sync_database_url = Config.DATABASE_URL.replace("+asyncpg", "").replace("postgresql+asyncpg", "postgresql+psycopg2")
         self.engine = create_engine(sync_database_url)
-
-        # Ne pas créer les tables automatiquement à l'import
-        # Utilisez la méthode create_tables() manuellement si nécessaire
-        # Base.metadata.create_all(self.engine)
-
         self.SessionLocal = sessionmaker(bind=self.engine)
         self.redis_client = redis_client
 
-    def create_tables(self):
-        """Créer les tables dans la base de données (à appeler manuellement)"""
-        Base.metadata.create_all(self.engine)
+    def get_session(self) -> Session:
+        """Obtenir une session SQLAlchemy"""
+        return self.SessionLocal()
 
     def list_contexts(self, user_id: str) -> list:
         """Lister les contextes (sessions) pour un utilisateur."""
@@ -108,13 +72,6 @@ class SharedContextService:
         finally:
             session.close()
 
-    def ensure_tables(self):
-        """Assure que les tables existent (idempotent)."""
-        self.create_tables()
-
-    def get_session(self) -> Session:
-        """Obtenir une session SQLAlchemy"""
-        return self.SessionLocal()
 
     async def get_context(self, user_id: str, session_id: str) -> Optional[Dict[str, Any]]:
         """

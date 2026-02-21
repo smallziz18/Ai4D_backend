@@ -7,6 +7,21 @@ from datetime import datetime
 from enum import Enum
 
 
+# Système de niveaux détaillé (1-10)
+LEVEL_SYSTEM = {
+    1: {"label": "Novice", "xp_min": 0, "xp_max": 100, "description": "Découverte de l'IA"},
+    2: {"label": "Débutant", "xp_min": 100, "xp_max": 300, "description": "Apprentissage des bases"},
+    3: {"label": "Apprenti", "xp_min": 300, "xp_max": 600, "description": "Compréhension des concepts fondamentaux"},
+    4: {"label": "Initié", "xp_min": 600, "xp_max": 1000, "description": "Maîtrise des fondamentaux"},
+    5: {"label": "Intermédiaire", "xp_min": 1000, "xp_max": 1500, "description": "Application pratique"},
+    6: {"label": "Confirmé", "xp_min": 1500, "xp_max": 2200, "description": "Projets complexes"},
+    7: {"label": "Avancé", "xp_min": 2200, "xp_max": 3000, "description": "Expertise technique"},
+    8: {"label": "Expert", "xp_min": 3000, "xp_max": 4000, "description": "Maîtrise approfondie"},
+    9: {"label": "Maître", "xp_min": 4000, "xp_max": 5500, "description": "Innovation et recherche"},
+    10: {"label": "Grand Maître", "xp_min": 5500, "xp_max": float('inf'), "description": "Niveau élite"}
+}
+
+
 class BadgeCategory(str, Enum):
     """Catégories de badges"""
     STREAK = "streak"  # Séries de jours consécutifs
@@ -51,13 +66,13 @@ class Achievement(str, Enum):
 # Configuration des badges avec métadonnées
 BADGE_CONFIG = {
     # Streaks
-    "🔥 Débutant": {
+    "🔥 Habitué": {
         "category": BadgeCategory.STREAK,
         "description": "3 jours consécutifs d'apprentissage",
         "xp_reward": 50,
         "condition": "streak >= 3"
     },
-    "🔥 Habitué": {
+    "🔥 Assidu": {
         "category": BadgeCategory.STREAK,
         "description": "7 jours consécutifs d'apprentissage",
         "xp_reward": 150,
@@ -102,30 +117,66 @@ BADGE_CONFIG = {
         "condition": "cv_score >= 90"
     },
 
-    # Niveaux
-    "⭐ Apprenti": {
+    # Niveaux (système 1-10)
+    "⭐ Novice": {
         "category": BadgeCategory.LEVEL,
-        "description": "Niveau 5 atteint",
+        "description": "Niveau 1 - Premiers pas en IA",
+        "xp_reward": 50,
+        "condition": "level >= 1"
+    },
+    "⭐ Débutant": {
+        "category": BadgeCategory.LEVEL,
+        "description": "Niveau 2 - Bases de l'IA acquises",
+        "xp_reward": 75,
+        "condition": "level >= 2"
+    },
+    "⭐⭐ Apprenti": {
+        "category": BadgeCategory.LEVEL,
+        "description": "Niveau 3 - Concepts fondamentaux maîtrisés",
         "xp_reward": 100,
+        "condition": "level >= 3"
+    },
+    "⭐⭐ Initié": {
+        "category": BadgeCategory.LEVEL,
+        "description": "Niveau 4 - Fondamentaux solides",
+        "xp_reward": 150,
+        "condition": "level >= 4"
+    },
+    "⭐⭐⭐ Intermédiaire": {
+        "category": BadgeCategory.LEVEL,
+        "description": "Niveau 5 - Application pratique",
+        "xp_reward": 300,
         "condition": "level >= 5"
     },
-    "⭐⭐ Intermédiaire": {
+    "⭐⭐⭐ Confirmé": {
         "category": BadgeCategory.LEVEL,
-        "description": "Niveau 10 atteint",
-        "xp_reward": 300,
-        "condition": "level >= 10"
+        "description": "Niveau 6 - Projets complexes",
+        "xp_reward": 500,
+        "condition": "level >= 6"
     },
-    "⭐⭐⭐ Avancé": {
+    "⭐⭐⭐⭐ Avancé": {
         "category": BadgeCategory.LEVEL,
-        "description": "Niveau 25 atteint",
-        "xp_reward": 1000,
-        "condition": "level >= 25"
+        "description": "Niveau 7 - Expertise technique",
+        "xp_reward": 800,
+        "condition": "level >= 7"
     },
-    "👑 Expert": {
+    "⭐⭐⭐⭐ Expert": {
         "category": BadgeCategory.LEVEL,
-        "description": "Niveau 50 atteint",
+        "description": "Niveau 8 - Maîtrise approfondie",
+        "xp_reward": 1200,
+        "condition": "level >= 8"
+    },
+    "👑 Maître": {
+        "category": BadgeCategory.LEVEL,
+        "description": "Niveau 9 - Innovation et recherche",
+        "xp_reward": 2000,
+        "condition": "level >= 9"
+    },
+    "👑 Grand Maître": {
+        "category": BadgeCategory.LEVEL,
+        "description": "Niveau 10 - Niveau élite atteint",
         "xp_reward": 5000,
-        "condition": "level >= 50"
+        "condition": "level >= 10"
     },
 
     # Achievements spéciaux

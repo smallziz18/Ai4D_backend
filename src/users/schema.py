@@ -2,7 +2,7 @@ from typing import List, Optional
 from uuid import UUID
 from enum import Enum
 from datetime import datetime
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 
@@ -12,6 +12,20 @@ from pydantic import BaseModel, EmailStr, Field
 class StatutUtilisateur(str, Enum):
     ETUDIANT = "Etudiant"
     PROFESSEUR = "Professeur"
+
+
+class Domaine(str, Enum):
+    INFORMATIQUE = "Informatique"
+    DATA_SCIENCE = "Data Science"
+    DROIT = "Droit"
+    MARKETING = "Marketing"
+    CHIMIE = "Chimie"
+    PHYSIQUE = "Physique"
+    MEDECINE = "Médecine"
+    BIOLOGIE = "Biologie"
+    ECONOMIE = "Économie"
+    MANAGEMENT = "Management"
+    GENERAL = "Général"
 
 
 # -------- BASE COMMUNE --------
@@ -39,10 +53,12 @@ class UtilisateurCreateBase(BaseModel):
     email: EmailStr
     motDePasseHash: str
     status: StatutUtilisateur
+    domaine: Optional[str] = "Général"  # Accepter string directement
 
 
 class ProfesseurCreate(UtilisateurBase):
     status: StatutUtilisateur = StatutUtilisateur.PROFESSEUR
+    domaine: Optional[str] = "Général"
     niveau_experience: int = Field(ge=0, le=20)
     specialites: List[str]
     motivation_principale: Optional[str]
@@ -51,11 +67,15 @@ class ProfesseurCreate(UtilisateurBase):
 
 class EtudiantCreate(UtilisateurBase):
     status: StatutUtilisateur = StatutUtilisateur.ETUDIANT
+    domaine: Optional[str] = "Général"
     niveau_technique: int = Field(ge=1, le=10)
     competences: List[str]
     objectifs_apprentissage: Optional[str]
     motivation: Optional[str]
     niveau_energie: int = Field(ge=1, le=10)
+
+
+
 
 
 # -------- SCHÉMAS DE LECTURE (GET) --------
@@ -67,9 +87,10 @@ class UtilisateurRead(BaseModel):
     username: str
     email: EmailStr
     status: StatutUtilisateur
+    domaine: Optional[str] = "Général"  # String, pas Enum !
     created_at: datetime
     updated_at: datetime
-    # Champs de profil pour le profiling
+    # ...existing code...
     niveau_technique: Optional[int] = None
     competences: Optional[List[str]] = None
     objectifs_apprentissage: Optional[str] = None
@@ -92,6 +113,7 @@ class ProfesseurRead(UtilisateurRead):
 
 
 class EtudiantRead(UtilisateurRead):
+    domaine: Optional[str] = "Général"  # String, pas Enum
     niveau_technique: int
     competences: List[str]
     objectifs_apprentissage: Optional[str]
@@ -99,7 +121,8 @@ class EtudiantRead(UtilisateurRead):
     niveau_energie: int
 
 
-class   UserLogin(BaseModel):
+# ...existing code...
+class UserLogin(BaseModel):
     email: EmailStr
     password: str
 
@@ -119,3 +142,5 @@ class PasswordResetModel(BaseModel):
 class PasswordResetConfirm(BaseModel):
     new_password: str
     confirm_new_password: str
+
+

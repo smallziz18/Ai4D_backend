@@ -9,6 +9,7 @@ from sqlmodel import Field
 class ProfilCreate(BaseModel):
     """Schema pour la création d'un profil"""
     utilisateur_id: UUID
+    domaine: str = "Général"
     niveau: int = 1
     xp: int = 0
     badges: List[str] = Field(default_factory=list)
@@ -40,6 +41,7 @@ class ProfilResponse(BaseModel):
     """Schema pour la réponse API"""
     id: str
     utilisateur_id: UUID
+    domaine: str
     niveau: int
     xp: int
     badges: List[str]

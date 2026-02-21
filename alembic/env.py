@@ -11,37 +11,22 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 config = context.config
+fileConfig(config.config_file_name)
 
-# Charger DATABASE_URL depuis l'environnement
-database_url = os.getenv("DATABASE_URL")
-if database_url:
-    # Remplacer asyncpg par psycopg2 pour Alembic (synchrone)
-    sync_url = database_url.replace("postgresql+asyncpg://", "postgresql://")
-    config.set_main_option('sqlalchemy.url', sync_url)
+# Import des modèles directement (éviter imports circulaires via src/__init__.py)
+from src.users.models import Utilisateur, Etudiant, Professeur
+target_metadata = Utilisateur.metadata
 
-# Interpret the config file for Python logging.
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
-
-# Import des modèles SQLModel (éviter imports circulaires)
-from sqlmodel import SQLModel
-
-# On importe les modèles seulement pour le metadata
-# Importer directement sans passer par __init__.py
-import importlib.util
-models_path = os.path.join(project_root, "src", "users", "models.py")
-spec = importlib.util.spec_from_file_location("user_models", models_path)
-user_models = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(user_models)
-
-target_metadata = SQLModel.metadata
 print("[INFO] target_metadata loaded successfully")
 
 def run_migrations_offline():
     """Run migrations in 'offline' mode."""
-    url = config.get_main_option("sqlalchemy.url")
-    if not url:
-        raise ValueError("DATABASE_URL is not set")
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        raise ValueError("DATABASE_URL environment variable is not set")
+
+    # Utiliser psycopg2 (synchrone) pour Alembic
+    url = database_url.replace("postgresql+asyncpg://", "postgresql://")
 
     context.configure(
         url=url,
@@ -53,11 +38,20 @@ def run_migrations_offline():
     with context.begin_transaction():
         context.run_migrations()
 
-
 def run_migrations_online():
     """Run migrations in 'online' mode."""
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        raise ValueError("DATABASE_URL environment variable is not set")
+
+    # Utiliser psycopg2 (synchrone) pour Alembic
+    sync_url = database_url.replace("postgresql+asyncpg://", "postgresql://")
+
+    configuration = config.get_section(config.config_ini_section) or {}
+    configuration["sqlalchemy.url"] = sync_url
+
     connectable = engine_from_config(
-        config.get_section(config.config_ini_section) or {},
+        configuration,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
@@ -66,7 +60,6 @@ def run_migrations_online():
         context.configure(connection=connection, target_metadata=target_metadata)
         with context.begin_transaction():
             context.run_migrations()
-
 
 if context.is_offline_mode():
     run_migrations_offline()

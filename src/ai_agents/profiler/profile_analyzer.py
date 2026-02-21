@@ -18,37 +18,73 @@ RÉSULTATS DU QUIZ:
 {evaluation_json}
 
 🎯 MISSION CRITIQUE:
-⚠️ **PRINCIPE FONDAMENTAL**: Les questions ouvertes (QuestionOuverte, ListeOuverte) sont **LA SOURCE DE VÉRITÉ** pour évaluer le vrai niveau.
-- Un utilisateur qui réussit les QCM mais échoue aux questions ouvertes est un **DÉBUTANT** (niveau 1-3)
-- Un utilisateur qui excelle aux questions ouvertes mais échoue aux QCM a pu faire des erreurs d'inattention (niveau reste élevé)
-- **SEULES les questions ouvertes révèlent la vraie compréhension conceptuelle**
+⚠️ **PRINCIPE D'ÉVALUATION ÉQUILIBRÉE**: Évalue le niveau de l'utilisateur en tenant compte de TOUS les indicateurs.
+- Les questions ouvertes montrent la compréhension conceptuelle
+- Les QCM montrent les connaissances théoriques
+- **COMBINE les deux** pour une évaluation juste et encourageante
+- **Sois GÉNÉREUX** dans l'évaluation - valorise les efforts et les connaissances partielles
+- En cas de doute entre deux niveaux, **choisis le niveau SUPÉRIEUR**
+
+⚠️ **ADAPTATION AU DOMAINE D'APPLICATION**:
+L'IA s'applique différemment selon le domaine professionnel de l'utilisateur. Adapte ton évaluation :
+
+**DOMAINES D'APPLICATION**:
+1. **Marketing & Communication**: Utilisation de l'IA pour l'analyse de données clients, personnalisation, chatbots, génération de contenu
+2. **Droit & Justice**: IA pour analyse de documents juridiques, recherche de jurisprudence, prédiction de décisions
+3. **Santé & Médecine**: Diagnostic assisté par IA, analyse d'images médicales, médecine prédictive
+4. **Finance & Comptabilité**: Analyse prédictive, détection de fraudes, trading algorithmique
+5. **Éducation & Formation**: Personnalisation de l'apprentissage, évaluation automatique, tuteurs intelligents
+6. **Informatique & Développement**: Développement de modèles IA, MLOps, architecture de systèmes IA
+7. **Arts & Création**: Génération d'images, musique, écriture assistée par IA
+8. **Sciences & Recherche**: Modélisation scientifique, analyse de données expérimentales
+9. **Management & RH**: Recrutement assisté par IA, analyse de performance, prédiction d'attrition
+10. **Agriculture & Environnement**: Optimisation des cultures, prédiction météo, monitoring environnemental
+
+**RÈGLES D'ÉVALUATION SELON LE DOMAINE**:
+- Pour un **non-informaticien** (marketing, droit, etc.): Ne pas attendre une maîtrise technique approfondie des algorithmes
+  - Niveau 7-8 = Sait utiliser des outils IA efficacement, comprend les concepts clés, peut superviser des projets IA
+  - Niveau 9-10 = Expert métier qui comprend profondément comment l'IA transforme son domaine
+  
+- Pour un **informaticien/développeur**: Attendre une compréhension technique plus approfondie
+  - Niveau 7-8 = Peut implémenter et déployer des modèles IA, comprend les algorithmes
+  - Niveau 9-10 = Peut concevoir des architectures IA complexes, faire de la recherche
+
+**INDICES DU DOMAINE D'APPLICATION**:
+- Statut utilisateur (Étudiant, Professeur, Professionnel)
+- Mentions dans les réponses ouvertes (ex: "pour mon travail de marketing", "dans mon cabinet d'avocats")
+- Type de questions posées ou d'intérêts exprimés
 
 Analyse chaque réponse pour identifier:
 1. **PRIORITÉ 1**: La profondeur de compréhension dans les questions ouvertes (sens, cohérence, précision)
-2. Les forces et faiblesses spécifiques en IA
-3. Les lacunes de connaissances précises
-4. Le style d'apprentissage (conceptuel vs pratique)
-5. Les domaines IA à prioriser
+2. **Le domaine d'application** probable de l'utilisateur
+3. Les forces et faiblesses spécifiques en IA pour son domaine
+4. Les lacunes de connaissances précises
+5. Le style d'apprentissage (conceptuel vs pratique vs applicatif)
+6. Les domaines IA à prioriser selon son profil professionnel
 
 📊 ANALYSE DÉTAILLÉE REQUISE:
 
-A. NIVEAU (1-10) - MÉTHODE D'ÉVALUATION STRICTE:
+A. NIVEAU (1-10) - MÉTHODE D'ÉVALUATION STRICTE ADAPTÉE AU DOMAINE:
 
 **ÉTAPE 1 - ANALYSE DES QUESTIONS OUVERTES (POIDS 70%)**:
 Examine CHAQUE question ouverte (QuestionOuverte, ListeOuverte):
 
 Pour chaque réponse ouverte, évalue:
 - **Sens et cohérence**: La réponse montre-t-elle une vraie compréhension du concept ?
-- **Profondeur conceptuelle**: Utilise-t-elle les bons termes techniques ? Explique-t-elle le "pourquoi" ?
+- **Profondeur conceptuelle**: Utilise-t-elle les bons termes ? Explique-t-elle le "pourquoi" ?
 - **Précision**: Les exemples sont-ils pertinents ? Les explications sont-elles justes ?
 - **Exhaustivité**: Pour les listes, a-t-elle mentionné les éléments clés ?
+- **Application pratique**: Mentionne-t-elle des cas d'usage dans son domaine ?
 
-Scoring des questions ouvertes:
-- Réponse vide ou hors-sujet: 0/10
-- Réponse superficielle sans termes techniques: 2/10
-- Réponse correcte mais incomplète: 5/10
-- Réponse solide avec bons concepts: 7/10
-- Réponse approfondie avec exemples et justifications: 10/10
+Scoring des questions ouvertes (adapté au domaine) - **SOIS GÉNÉREUX**:
+- Réponse vide: 0/10
+- Réponse très courte mais pertinente: 4/10 ⬆️
+- Réponse avec quelques termes techniques: 6/10 ⬆️
+- Réponse correcte mais incomplète: 7/10 ⬆️
+- Réponse solide avec bons concepts: 8/10 ⬆️
+- Réponse approfondie avec exemples: 9/10
+- Réponse complète avec justifications et vision: 10/10
+- **BONUS**: +1 point si mention d'application dans son domaine professionnel
 
 Calcule la **moyenne des questions ouvertes** (ex: 6.5/10)
 
@@ -59,136 +95,173 @@ Calcule la **moyenne des questions ouvertes** (ex: 6.5/10)
 **ÉTAPE 3 - CALCUL FINAL**:
 niveau = (moyenne_questions_ouvertes × 0.7) + (score_qcm × 0.3)
 
-**RÈGLES DE PLAFONNEMENT**:
-- Si moyenne questions ouvertes < 4/10 → niveau MAX = 3 (même avec 100% QCM)
-- Si moyenne questions ouvertes < 6/10 → niveau MAX = 5
-- Si réponses ouvertes vides ou incohérentes → niveau MAX = 2
-- Si moyenne questions ouvertes > 8/10 → niveau MIN = 7 (même avec QCM faibles)
+**RÈGLES DE NIVEAU (GÉNÉREUSES ET ENCOURAGEANTES)**:
 
-**RÈGLE DE COHÉRENCE AVEC COMPÉTENCES DÉCLARÉES**:
-- Si l'utilisateur déclare des compétences avancées (ex: "CNN", "NLP", "Transformers", "Backpropagation") ET que la moyenne des questions ouvertes ≥ 6/10 → niveau MIN = 5 (intermédiaire)
-- Si compétences très avancées (ex: "Attention Mechanisms", "Transfer Learning") ET moyenne des questions ouvertes ≥ 7/10 → niveau MIN = 7 (avancé)
-- Si compétences avancées mais réponses ouvertes faibles (< 5/10) → ne PAS rehausser le niveau (cohérence prime sur déclaratif)
+Pour **NON-INFORMATICIENS** (Marketing, Droit, Finance, etc.):
+- Si moyenne questions ouvertes < 3/10 → niveau = 2-3 (novice/débutant)
+- Si moyenne questions ouvertes 3-5/10 → niveau = 4-5 (apprenti/initié) ⬆️
+- Si moyenne questions ouvertes 5-7/10 → niveau = 6-7 (intermédiaire/confirmé) ⬆️
+- Si moyenne questions ouvertes 7-8/10 → niveau = 8 (avancé) ⬆️
+- Si moyenne questions ouvertes > 8/10 → niveau = 9-10 (expert/maître) ⬆️
 
-**EXEMPLES CONCRETS**:
-- QCM: 90%, Questions ouvertes: vides → NIVEAU = 2 (débutant qui devine)
-- QCM: 50%, Questions ouvertes: excellentes (8/10) → NIVEAU = 7 (expert distrait)
-- QCM: 80%, Questions ouvertes: solides (7/10) → NIVEAU = 7
-- QCM: 100%, Questions ouvertes: superficielles (4/10) → NIVEAU = 4
+Pour **INFORMATICIENS/DÉVELOPPEURS**:
+- Si moyenne questions ouvertes < 3/10 → niveau = 2-3 (débutant technique)
+- Si moyenne questions ouvertes 3-5/10 → niveau = 4-5 (utilisateur d'outils IA) ⬆️
+- Si moyenne questions ouvertes 5-7/10 → niveau = 6-7 (développeur IA) ⬆️
+- Si moyenne questions ouvertes 7-8/10 → niveau = 8 (avancé) ⬆️
+- Si moyenne questions ouvertes > 8/10 → niveau = 9-10 (expert/maître IA) ⬆️
 
-B. COMPÉTENCES (liste détaillée):
+**RÈGLE DE COHÉRENCE AVEC COMPÉTENCES DÉCLARÉES** (ENCOURAGEANTE):
+- Si l'utilisateur déclare des compétences avancées → niveau MIN = 5 (intermédiaire) ⬆️
+- Si compétences très avancées ET score global ≥ 50% → niveau MIN = 6 (confirmé) ⬆️
+- **En cas de doute, privilégie le niveau SUPÉRIEUR** pour encourager l'utilisateur ⬆️
+- Si QCM excellent (≥80%) mais questions ouvertes moyennes (≥5/10) → niveau MIN = 6 ⬆️
+
+**EXEMPLES CONCRETS** (ÉVALUATION ENCOURAGEANTE):
+- Avocat, QCM: 90%, Questions ouvertes: vides → NIVEAU = 3-4 (débutant avec potentiel) ⬆️
+- Marketeur, QCM: 50%, Questions ouvertes: bonnes sur chatbots (6/10) → NIVEAU = 6-7 (confirmé métier IA) ⬆️
+- Développeur, QCM: 80%, Questions ouvertes: solides sur CNN/RNN (7/10) → NIVEAU = 8 (avancé) ⬆️
+- Étudiant info, QCM: 100%, Questions ouvertes: moyennes (5/10) → NIVEAU = 6 (intermédiaire solide) ⬆️
+- Chimiste, QCM: 70%, Questions ouvertes: pertinentes (6/10) → NIVEAU = 6-7 (expert métier) ⬆️
+
+B. DOMAINE D'APPLICATION (nouveau champ):
+Identifie le domaine professionnel de l'utilisateur parmi:
+- "Marketing & Communication"
+- "Droit & Justice"
+- "Santé & Médecine"
+- "Finance & Comptabilité"
+- "Éducation & Formation"
+- "Informatique & Développement"
+- "Arts & Création"
+- "Sciences & Recherche"
+- "Management & RH"
+- "Agriculture & Environnement"
+- "Général" (si non déterminé)
+
+C. COMPÉTENCES (liste détaillée ADAPTÉE AU DOMAINE):
 ⚠️ **NE liste que les compétences démontrées dans les QUESTIONS OUVERTES**
-- Si l'utilisateur explique bien les CNN dans une question ouverte → ajoute "CNN"
-- Si l'utilisateur coche la bonne case sur les CNN mais ne peut pas expliquer → NE PAS ajouter "CNN"
-- Sois spécifique: "Deep Learning", "Backpropagation", "Transfer Learning", "Attention Mechanisms"
-- Maximum 5-7 compétences VRAIMENT maîtrisées
 
-C. OBJECTIFS (texte détaillé):
-- **Focus sur les lacunes révélées par les questions ouvertes**
-- Si réponses ouvertes faibles → objectif = "Approfondir la compréhension conceptuelle"
-- Propose un parcours progressif: théorie → pratique → projets
-- Mentionne les concepts IA à renforcer avec exemples concrets
+Pour **NON-INFORMATICIENS**, privilégie:
+- "Utilisation d'outils IA"
+- "Compréhension des concepts IA"
+- "Chatbots et assistants virtuels"
+- "Analyse prédictive"
+- "Personnalisation algorithmique"
+- "Éthique de l'IA"
+- "Prompt engineering"
+- "Vision stratégique de l'IA"
 
-D. MOTIVATION (analyse psychologique):
+Pour **INFORMATICIENS**, privilégie:
+- "Machine Learning"
+- "Deep Learning"
+- "CNN", "RNN", "Transformers"
+- "NLP", "Computer Vision"
+- "MLOps", "Déploiement de modèles"
+- "Architecture IA"
+- "Optimisation d'algorithmes"
+
+D. OBJECTIFS (texte détaillé PERSONNALISÉ AU DOMAINE):
+- **Focus sur les cas d'usage du domaine professionnel**
+- Si marketing → objectifs sur personnalisation, analyse client, génération de contenu
+- Si droit → objectifs sur analyse de documents, recherche juridique
+- Si développeur → objectifs sur implémentation de modèles, architecture
+- Propose un parcours progressif adapté au domaine
+
+E. MOTIVATION (analyse psychologique):
 - Analyse la **qualité de rédaction** des réponses ouvertes (pas juste le score)
 - Réponses détaillées → forte motivation intrinsèque
 - Réponses courtes/bâclées → motivation faible ou manque de temps
 - Adapte le ton selon l'effort fourni
 
-E. ENERGIE (1-10):
-- **Base-toi sur la QUALITÉ des réponses ouvertes, pas juste si elles sont remplies**
+F. ENERGIE (1-10):
+- **Base-toi sur la QUALITÉ des réponses ouvertes**
 - Réponses ouvertes détaillées et réfléchies → énergie 8-10
 - Réponses ouvertes courtes mais présentes → énergie 5-7
 - Réponses ouvertes vides ou "je ne sais pas" → énergie 1-3
 
-F. PRÉFÉRENCES (objet détaillé):
-- **themes**: Déduis des QUESTIONS OUVERTES quels thèmes IA l'intéressent vraiment
-- **type_de_questions**: Si écart énorme entre QCM et questions ouvertes → note "preference_apparente_vs_reelle"
-- **niveau_cible**: Basé sur l'écart actuel révélé par les questions ouvertes
-- **style_apprentissage**: 
-  - Bonnes réponses ouvertes théoriques → "theorique"
-  - Mention d'exemples/projets dans réponses → "pratique"
-  - Les deux → "mixte"
-- **domaines_a_renforcer**: Domaines où réponses ouvertes étaient faibles/vides
-- **points_forts**: Domaines où réponses ouvertes étaient excellentes
+G. PRÉFÉRENCES (objet détaillé):
+- **domaine_application**: Le domaine professionnel identifié
+- **themes**: Déduis des QUESTIONS OUVERTES quels thèmes IA l'intéressent
+- **style_apprentissage**: "theorique|pratique|applicatif|mixte"
+- **domaines_a_renforcer**: Selon son domaine professionnel
+- **points_forts**: Selon son domaine professionnel
 
-G. RECOMMANDATIONS (nouveau champ):
+H. RECOMMANDATIONS (nouveau champ ADAPTÉ AU DOMAINE):
 - **Si questions ouvertes faibles**: Recommande de renforcer les bases conceptuelles
-- **Si QCM faibles mais questions ouvertes fortes**: Recommande de faire plus d'exercices pratiques
-- 3-5 actions concrètes basées sur l'analyse des réponses ouvertes
-
-📝 EXEMPLES D'ANALYSE SÉMANTIQUE DES RÉPONSES OUVERTES:
-
-**Question**: "Expliquez le concept de backpropagation"
-- ❌ Réponse vide → 0/10 → Compétence NON acquise
-- ❌ "C'est un algorithme" → 2/10 → Compréhension superficielle
-- ⚠️ "Ça sert à entraîner les réseaux de neurones" → 4/10 → Idée générale mais pas de détails
-- ✅ "C'est un algorithme qui calcule les gradients en propageant l'erreur de la sortie vers l'entrée" → 7/10 → Bonne compréhension
-- ✅✅ "Backpropagation utilise la règle de la chaîne pour calculer les dérivées partielles de la loss function par rapport à chaque poids, permettant l'optimisation par descente de gradient" → 10/10 → Maîtrise complète
-
-**Question**: "Citez 3 types de réseaux de neurones"
-- ❌ Réponse vide → 0/10
-- ❌ "réseaux, neurones, IA" → 1/10 → Hors sujet
-- ⚠️ "CNN, RNN" → 5/10 → 2/3 correct mais incomplet
-- ✅ "CNN (Convolutional), RNN (Recurrent), Transformers" → 9/10 → Complet et précis
-- ✅✅ "CNN pour images, RNN pour séquences, Transformers pour NLP moderne avec attention" → 10/10 → Complet avec contexte
+- **Si non-informaticien**: Focus sur l'utilisation d'outils IA dans son métier
+- **Si informaticien**: Focus sur l'implémentation technique
+- 3-5 actions concrètes basées sur le domaine d'application
 
 🎨 FORMAT DE SORTIE:
 Retourne un JSON valide avec cette structure exacte:
 
 {{
   "niveau": <int 1-10>,
-  "niveau_reel": "débutant|intermédiaire|avancé|expert",
+  "niveau_reel": "novice|débutant|apprenti|initié|intermédiaire|confirmé|avancé|expert|maître|grand_maître",
+  "domaine_application": "Marketing & Communication|Droit & Justice|...|Général",
   "score_questions_ouvertes": <float 0-10>,
   "score_qcm": <float 0-10>,
   "comprehension_profonde": "faible|moyenne|bonne|excellente",
   "capacite_explication": "faible|moyenne|bonne|excellente",
+  "profil_utilisateur": "non_informaticien|informaticien|etudiant|chercheur",
   "competences": ["compétence1", "compétence2", ...],
-  "objectifs": "texte détaillé des objectifs personnalisés",
+  "objectifs": "texte détaillé des objectifs personnalisés selon le domaine",
   "motivation": "analyse de la motivation",
   "energie": <int 1-10>,
   "preferences": {{
+    "domaine_application": "...",
     "themes": ["theme1", "theme2"],
-    "style_apprentissage": "theorique|pratique|mixte",
+    "style_apprentissage": "theorique|pratique|applicatif|mixte",
     "domaines_a_renforcer": ["domaine1", "domaine2"],
     "points_forts": ["force1", "force2"]
   }},
   "recommandations": [
-    "Recommandation concrète 1",
-    "Recommandation concrète 2",
-    "Recommandation concrète 3",
-    "Recommandation concrète 4",
-    "Recommandation concrète 5"
+    "Recommandation concrète 1 adaptée au domaine",
+    "Recommandation concrète 2 adaptée au domaine",
+    "Recommandation concrète 3 adaptée au domaine",
+    "Recommandation concrète 4 adaptée au domaine",
+    "Recommandation concrète 5 adaptée au domaine"
   ],
-  "commentaires": "Analyse narrative personnalisée expliquant le niveau déterminé et les recommandations"
+  "commentaires": "Analyse narrative personnalisée expliquant le niveau déterminé, le domaine d'application identifié et les recommandations"
 }}
 
-⚠️ RAPPELS IMPORTANTS:
-1. **Les questions ouvertes sont LA source de vérité** - ne te laisse pas tromper par un bon score QCM
-2. Sois strict dans l'évaluation des réponses ouvertes - vide = 0, superficielle = 2-3
-3. Les recommandations doivent être actionnables et spécifiques aux lacunes identifiées
-4. Le champ "commentaires" doit expliquer pourquoi tu as attribué ce niveau
+⚠️ PRINCIPES D'ÉVALUATION:
+1. **Sois GÉNÉREUX et ENCOURAGEANT** - valorise les connaissances partielles ⬆️
+2. **En cas de doute entre deux niveaux, choisis le SUPÉRIEUR** ⬆️
+3. **Adapte l'évaluation au domaine professionnel** - chaque métier utilise l'IA différemment
+4. **Combine QCM + questions ouvertes** - ne te base pas uniquement sur les questions ouvertes
+5. **Les recommandations doivent être positives et actionnables** selon le domaine
+6. **Le champ "commentaires" doit être encourageant** et expliquer le potentiel de l'utilisateur
 """
 
 
-def analyze_profile_with_llm(user_json: str, evaluation_json: str) -> str:
+def analyze_profile_with_llm(user_json: str, evaluation_json: str, domaine: str = "Général") -> str:
     """
     Analyse le profil d'un utilisateur basé sur ses résultats de quiz avec un LLM.
 
     Args:
         user_json: JSON string contenant les données de l'utilisateur
         evaluation_json: JSON string contenant les résultats du quiz
+        domaine: Le domaine d'études de l'utilisateur (Informatique, Droit, Marketing, etc.)
 
     Returns:
         str: Réponse du LLM contenant l'analyse au format JSON
     """
+    from src.ai_agents.profiler.domain_context import get_domain_specific_prompt
+
     llm = ChatOpenAI(
         model="gpt-4o-mini",
         temperature=0.3,
         api_key=Config.OPENAI_API_KEY
     )
 
-    prompt = ANALYZE_PROMPT.format(
+    # Obtenir le prompt contextualisé au domaine
+    domain_context = get_domain_specific_prompt(domaine)
+
+    # Ajouter le contexte domaine au prompt
+    prompt_with_domain = ANALYZE_PROMPT + f"\n\n🎯 CONTEXTE DOMAINE:\n{domain_context}"
+
+    prompt = prompt_with_domain.format(
         user_json=user_json,
         evaluation_json=evaluation_json
     )

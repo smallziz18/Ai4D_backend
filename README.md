@@ -1,54 +1,100 @@
-# AI4D — Backend for Adaptive AI Learning Platform
+# AI4D — Backend for Adaptive AI Learning Platform 🚀
 
-This repository contains the backend code for AI4D, a personalized, gamified learning platform focused on AI and data engineering. It provides question generation, user profiling, assessment handling, and profile generation using LLMs and fallback logic. This project is intended as part of a memory/thesis project and is structured for local development and deployment.
+[![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)](CHANGELOG.md)
+[![Tests](https://img.shields.io/badge/tests-6%2F6%20passing-success.svg)](test_corrections.py)
+[![Python](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-proprietary-red.svg)](LICENSE)
+
+This repository contains the backend code for AI4D, a **personalized, gamified learning platform** focused on AI and data engineering. It provides intelligent question generation, adaptive user profiling, automated roadmap generation with **real educational resources**, and comprehensive assessment handling using LLMs.
+
+## 🎉 What's New in v2.0.0
+
+- ✨ **MCP (Model Context Protocol)** for automatic resource search (YouTube, Coursera, edX, etc.)
+- 🎯 **Smart Level Detection** - Sophisticated algorithm detecting real user level (1-10)
+- 🗺️ **Auto-Enriched Roadmaps** - Modules filled with curated videos, courses, and projects
+- 🔧 **Event Loop Fixes** - Proper async/await handling in Celery tasks
+- 📝 **Postman Test Suite** - 12 pre-configured requests for easy testing
+- 📚 **Complete Documentation** - RESUME_FINAL.md, POSTMAN_GUIDE.md, and more
+
+[See full CHANGELOG →](CHANGELOG.md)
 
 ## Table of contents
 
-- Project overview
-- Key features
-- Architecture overview
-- Requirements
-- Environment variables
-- Quickstart (development)
-- Running services and workers
-- Streamlit frontend (local)
-- Running tests
-- Security and best practices
-- How profiling and LLM calls work
-- Recommendations and TODOs
-- Contributing
-- License
-- Contact
+- [Project overview](#project-overview)
+- [Key features](#key-features)
+- [Quick Start](#quick-start)
+- [Architecture overview](#architecture-overview)
+- [Requirements](#requirements)
+- [Environment variables](#environment-variables)
+- [Running services and workers](#running-services-and-workers)
+- [Testing](#testing)
+- [Documentation](#documentation)
+- [Contributing](#contributing)
+- [License](#license)
 
 
 ## Project overview
 
 AI4D backend implements APIs and background tasks to:
 
-- Generate quizzes and personalized questions for users (via LLM or fallback).
-- Collect user answers and compute scores.
-- Analyze quiz results to generate a learning profile (profile analysis task).
-- Persist profiles and activity history (MongoDB + PostgreSQL usage in project).
-- Run asynchronous tasks using Celery (Redis broker and backend).
-- Expose an authenticated API for the Streamlit frontend and other clients.
+- **Generate personalized quizzes** adapted to user level (via LLM with smart fallback)
+- **Analyze questionnaire responses** with sophisticated level detection algorithm
+- **Generate adaptive roadmaps** automatically enriched with real educational resources
+- **Search and recommend** high-quality learning materials (videos, courses, projects)
+- **Track user progression** with gamification (XP, badges, levels)
+- **Persist profiles** and activity history (MongoDB + PostgreSQL)
+- **Run asynchronous tasks** using Celery (Redis broker)
+- **Expose authenticated APIs** for frontend and Postman testing
 
-The repository contains code in `src/`, Celery tasks in `src/celery_tasks.py`, profile logic in `src/profile/`, and a Streamlit demo app in `streamlit_app/`.
+The repository contains:
+- Core API in `src/`
+- Celery tasks in `src/celery_tasks.py`
+- Profile & roadmap logic in `src/profile/`
+- MCP resource search in `src/ai_agents/mcp/`
+- Test suite in `test_corrections.py`
+- Postman collection in `postman_roadmap_testing.json`
 
 
 ## Key features
 
-- Question generation pipeline using an LLM with robust fallback when the LLM or its credentials are unavailable.
-- Celery-based asynchronous tasks for long-running operations (question generation, profile analysis).
-- MongoDB for profile and activity storage and Redis for Celery broker/results.
-- Email utilities for account verification and notifications.
-- Streamlit-based demo frontend (for rapid testing and demos).
-- Config-driven environment management via a `.env` file and `pydantic-settings`.
+### 🎯 Intelligent Profiling
+- **Sophisticated level detection** (1-10) based on:
+  - Question accuracy rate
+  - Weighted scoring (70% open questions + 30% MCQ)
+  - Advanced skill detection (CNN, RNN, Transformers, etc.)
+  - Automatic level adjustment with bonuses
+
+### 🗺️ Adaptive Roadmaps
+- **Auto-generated learning paths** based on user profile
+- **Enriched with real resources**:
+  - 📹 YouTube videos (Machine Learnia, 3Blue1Brown, etc.)
+  - 🎓 Online courses (Coursera, edX, OpenClassrooms, Harvard CS50)
+  - 📚 Articles and tutorials
+  - 💻 Practical projects (GitHub, Kaggle)
+- **Dynamic XP system**: `50 + (level × 5)` for videos, `100 + (level × 10)` for courses
+
+### 🔍 MCP Resource Search
+- **Automatic search** of quality educational content
+- **Multi-language support** (FR/EN)
+- **Level adaptation** (beginner to expert)
+- **Curated database** of 50+ high-quality resources
+
+### 🎮 Gamification
+- **XP and leveling system**
+- **Badges and achievements**
+- **Progress tracking** per module and course
+- **Energy system** for engagement
+
+### 🔐 Security & Auth
+- **JWT authentication** with access/refresh tokens
+- **Email verification**
+- **Session management** with Redis
+- **Proper async handling** in Celery workers
 
 
-## Architecture overview
+## Quick Start
 
-- API server (FastAPI or equivalent) — exposes `/api/profile/v1` and `/api/auth/v1` endpoints.
-- Background workers (Celery) — run `generate_profile_question_task` and `profile_analysis_task`.
+### Option 1: Automated Script (Recommended)
 - LLM integration — calls to an LLM endpoint (local or OpenAI) with fallback profile logic.
 - Datastores — Redis (broker/results) and MongoDB (profiles), PostgreSQL for core app data.
 - Frontend — a Streamlit app under `streamlit_app/` used for manual testing and demos.

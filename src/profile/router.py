@@ -471,11 +471,123 @@ async def health_check():
     return {"status": "ok", "message": "API de profil fonctionnelle"}
 
 
-# Génération de question personnalisée (LangChain si dispo)
+# Génération de question personnalisée - MAINTENANT PAR DOMAINE
 try:
-    from src.ai_agents.profiler.question_generator import generate_profile_question  # type: ignore
+    from src.ai_agents.profiler.questionnaires_par_domaine import (
+        get_questionnaire_for_domain,
+        get_available_domains
+    )
 except Exception:
-    generate_profile_question = None  # fallback ci-dessous
+    get_questionnaire_for_domain = None
+    get_available_domains = None
+
+
+@router.get("/domains")
+async def get_available_professions():
+    """Retourne les domaines professionnels disponibles"""
+    if not get_available_domains:
+        return {
+            "domains": [
+                "Droit & Justice",
+                "Marketing & Communication",
+                "Santé & Médecine",
+                "Finance & Comptabilité",
+                "Informatique & Développement",
+                "Éducation & Formation"
+            ]
+        }
+    return {"domains": get_available_domains()}
+
+
+@router.get("/initial_questionnaire")
+async def get_initial_questionnaire(
+    current_user: Utilisateur = Depends(get_current_user)
+):
+    """
+    Retourne les questions du questionnaire initial adapté au domaine de l'utilisateur.
+
+    Ce questionnaire:
+    - Est fait UNE SEULE FOIS pour créer le profil initial
+    - Est adapté au domaine d'études (Informatique, Droit, Marketing, etc.)
+    - Contient des questions de choix multiple et 1-2 questions ouvertes maximum
+    - Ne contient PAS de vraies/faux
+    """
+    try:
+        from src.ai_agents.profiler.questionnaires_domaines import DomainQuestionnaireGenerator
+
+        # Vérifier si l'utilisateur a déjà un profil complété
+        profile = await profile_service.get_profile_by_user_id(current_user.id)
+        if profile and profile.questionnaire_initial_complete:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Vous avez déjà complété le questionnaire initial. Un profil a été créé pour vous."
+            )
+
+        # Extraire le domaine de l'utilisateur
+        domaine = "Général"
+        if hasattr(current_user, 'etudiant') and current_user.etudiant:
+            domaine = str(current_user.etudiant.domaine)
+        elif hasattr(current_user, 'professeur') and current_user.professeur:
+            domaine = str(current_user.professeur.domaine)
+
+        # Récupérer les questions adaptées au domaine
+        questions = DomainQuestionnaireGenerator.get_questions_for_domain(domaine)
+
+        return {
+            "domaine": domaine,
+            "questions": questions,
+            "total_questions": len(questions),
+            "instructions": f"Questionnaire de profilage adapté au domaine: {domaine}",
+            "note": "Ce questionnaire crée votre profil et ne peut être fait qu'une seule fois"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting initial questionnaire: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Erreur lors du chargement du questionnaire"
+        )
+
+
+@router.get("/questionnaire")
+async def get_questionnaire(
+    domain: str = None,
+    current_user: Utilisateur = Depends(get_current_user)
+):
+    """
+    Retourne le questionnaire adapté au domaine professionnel de l'utilisateur.
+    Les questions sont VARIÉES et MÉLANGÉES à chaque appel pour éviter la répétition.
+
+    Si domain n'est pas fourni, utilise le profil de l'utilisateur pour déterminer le domaine.
+    Si pas de profil, utilise Informatique & Développement par défaut.
+    """
+    try:
+        # Déterminer le domaine
+        if not domain:
+            # Chercher dans le profil si le domaine est connu
+            profile = await profile_service.get_profile_by_user_id(current_user.id)
+            if profile and hasattr(profile, 'domaine_application'):
+                domain = profile.domaine_application
+            else:
+                # Défaut : Informatique
+                domain = "Informatique & Développement"
+
+        # 🎲 Récupérer des questions VARIÉES et MÉLANGÉES au lieu des mêmes
+        from src.ai_agents.profiler.questionnaires_par_domaine import get_shuffled_questions
+        questions = get_shuffled_questions(domain, num_questions=5)
+
+        return {
+            "domain": domain,
+            "description": f"Questions variées pour {domain}",
+            "questions": questions,
+            "total_questions": len(questions)
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting questionnaire: {e}")
+        raise HTTPException(status_code=500, detail="Erreur lors du chargement du questionnaire")
 
 
 @router.get("/question")
@@ -540,8 +652,15 @@ async def analyze_quiz(
         u = UtilisateurRead.model_validate(current_user, from_attributes=True)
         user_dict = u.model_dump()
 
-        # Lancer l'analyse avec le bon flag
-        task = profile_analysis_task.delay(user_dict, evaluation, is_initial)
+        # Extraire le domaine de l'utilisateur
+        domaine = getattr(current_user, 'domaine', 'Général')
+        if hasattr(current_user, 'etudiant') and current_user.etudiant:
+            domaine = current_user.etudiant.domaine
+        elif hasattr(current_user, 'professeur') and current_user.professeur:
+            domaine = current_user.professeur.domaine
+
+        # Lancer l'analyse avec le bon flag et le domaine
+        task = profile_analysis_task.delay(user_dict, evaluation, is_initial, domaine)
 
         message = "Questionnaire initial en cours d'analyse" if is_initial else "Quiz en cours d'analyse"
 
@@ -800,5 +919,328 @@ async def has_profile_endpoint(current_user: Utilisateur = Depends(get_current_u
     return {
         "has_profile": True,
         "questionnaire_initial_complete": bool(getattr(profil, 'questionnaire_initial_complete', False))
+    }
+
+
+# ==================== ROADMAP & COURS (GAMIFICATION) ====================
+
+@router.get("/roadmap")
+async def get_my_roadmap(current_user: Utilisateur = Depends(get_current_user)):
+    """
+    Récupère la roadmap active de l'utilisateur (cours personnalisé avec modules et leçons).
+
+    Retourne:
+    - Les modules avec leurs leçons et XP
+    - La progression actuelle (% complétion, module actuel)
+    - Les ressources à consulter pour progresser
+    """
+    from src.profile.roadmap_services import roadmap_service
+
+    roadmap = await roadmap_service.get_active_roadmap(current_user.id)
+
+    if not roadmap:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Aucune roadmap trouvée. Complétez d'abord le questionnaire initial."
+        )
+
+    return {
+        "roadmap": roadmap,
+        "message": "Roadmap récupérée avec succès"
+    }
+
+
+@router.get("/courses/{course_id}")
+async def get_course_details(
+    course_id: str,
+    current_user: Utilisateur = Depends(get_current_user)
+):
+    """
+    Récupère les détails complets d'un cours (modules, leçons, ressources, XP par leçon).
+
+    Args:
+        course_id: ID du cours
+
+    Retourne:
+    - Métadonnées du cours (titre, description, durée)
+    - Liste des modules avec leçons
+    - Progression de l'utilisateur
+    - XP disponible par module/leçon
+    """
+    from src.profile.roadmap_services import roadmap_service
+
+    # Récupérer le cours depuis MongoDB
+    course = await roadmap_service.courses_collection.find_one({"course_id": course_id})
+
+    if not course:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Cours introuvable"
+        )
+
+    # Vérifier que le cours appartient à l'utilisateur
+    if course.get("user_id") != str(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Accès non autorisé à ce cours"
+        )
+
+    # Récupérer la progression
+    progression = await roadmap_service.get_user_progression(current_user.id, course_id)
+
+    # Convertir ObjectId en string
+    course["_id"] = str(course["_id"])
+
+    return {
+        "course": course,
+        "progression": progression,
+        "message": "Cours récupéré avec succès"
+    }
+
+
+@router.post("/courses/{course_id}/lessons/{lesson_id}/complete")
+async def complete_lesson(
+    course_id: str,
+    lesson_id: str,
+    time_spent_minutes: int = Body(default=10, ge=1, le=300),
+    current_user: Utilisateur = Depends(get_current_user)
+):
+    """
+    Marque une leçon comme complétée et ajoute l'XP correspondant.
+
+    Args:
+        course_id: ID du cours
+        lesson_id: ID de la leçon
+        time_spent_minutes: Temps passé sur la leçon (pour stats)
+
+    Retourne:
+    - XP gagné
+    - Nouvelle progression
+    - Prochain objectif (leçon suivante ou module suivant)
+    """
+    from src.profile.roadmap_services import roadmap_service
+
+    # Récupérer le cours pour connaître l'XP de la leçon
+    course = await roadmap_service.courses_collection.find_one({"course_id": course_id})
+
+    if not course or course.get("user_id") != str(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Accès non autorisé"
+        )
+
+    # Trouver l'XP de la leçon
+    lesson_xp = 50  # XP par défaut
+    for module in course.get("modules", []):
+        for lesson in module.get("lessons", []):
+            if lesson.get("id") == lesson_id:
+                lesson_xp = lesson.get("xp", 50)
+                break
+
+    # Marquer la leçon comme complétée
+    result = await roadmap_service.complete_lesson(
+        user_id=current_user.id,
+        course_id=course_id,
+        lesson_id=lesson_id,
+        xp_earned=lesson_xp
+    )
+
+    # Ajouter l'XP au profil global
+    if result["status"] == "success":
+        await profile_service.add_xp(current_user.id, lesson_xp)
+
+        # Invalider les caches
+        try:
+            await invalidate_user_related_caches(current_user.id)
+        except Exception as e:
+            logger.warning(f"Cache invalidation failed: {e}")
+
+    return {
+        "status": result["status"],
+        "message": result["message"],
+        "xp_earned": lesson_xp,
+        "lesson_id": lesson_id
+    }
+
+
+@router.post("/courses/{course_id}/modules/{module_id}/complete")
+async def complete_module(
+    course_id: str,
+    module_id: str,
+    evaluation_score: float = Body(..., ge=0, le=100),
+    current_user: Utilisateur = Depends(get_current_user)
+):
+    """
+    Marque un module comme complété après évaluation.
+
+    Args:
+        course_id: ID du cours
+        module_id: ID du module
+        evaluation_score: Score obtenu (0-100)
+
+    Retourne:
+    - Réussite/échec (seuil 70%)
+    - XP gagné
+    - Module suivant débloqué
+    - Nouveau pourcentage de complétion du cours
+    """
+    from src.profile.roadmap_services import roadmap_service
+
+    # Vérifier l'accès au cours
+    course = await roadmap_service.courses_collection.find_one({"course_id": course_id})
+
+    if not course or course.get("user_id") != str(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Accès non autorisé"
+        )
+
+    # XP pour complétion de module (200 XP si réussi)
+    module_xp = 200 if evaluation_score >= 70 else 0
+
+    result = await roadmap_service.complete_module(
+        user_id=current_user.id,
+        course_id=course_id,
+        module_id=module_id,
+        evaluation_score=evaluation_score,
+        xp_earned=module_xp
+    )
+
+    # Ajouter l'XP au profil global si réussi
+    if result.get("passed") and module_xp > 0:
+        await profile_service.add_xp(current_user.id, module_xp)
+
+        # Invalider les caches
+        try:
+            await invalidate_user_related_caches(current_user.id)
+        except Exception as e:
+            logger.warning(f"Cache invalidation failed: {e}")
+
+    return result
+
+
+@router.get("/courses/{course_id}/progression")
+async def get_course_progression(
+    course_id: str,
+    current_user: Utilisateur = Depends(get_current_user)
+):
+    """
+    Récupère la progression détaillée pour un cours spécifique.
+
+    Retourne:
+    - Pourcentage de complétion global
+    - Modules complétés
+    - Leçons complétées
+    - XP gagné dans ce cours
+    - Temps passé
+    - Module/leçon actuelle
+    """
+    from src.profile.roadmap_services import roadmap_service
+
+    progression = await roadmap_service.get_user_progression(current_user.id, course_id)
+
+    if not progression:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Aucune progression trouvée pour ce cours"
+        )
+
+    return {
+        "progression": progression,
+        "course_id": course_id
+    }
+
+
+@router.get("/courses/{course_id}/modules/{module_id}")
+async def get_module_details(
+    course_id: str,
+    module_id: str,
+    current_user: Utilisateur = Depends(get_current_user)
+):
+    """
+    Récupère les détails d'un module spécifique (leçons, ressources, XP).
+
+    Utile pour afficher le contenu d'un module avant de le démarrer.
+    """
+    from src.profile.roadmap_services import roadmap_service
+
+    course = await roadmap_service.courses_collection.find_one({"course_id": course_id})
+
+    if not course or course.get("user_id") != str(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Accès non autorisé"
+        )
+
+    # Trouver le module
+    target_module = None
+    for module in course.get("modules", []):
+        if module.get("id") == module_id:
+            target_module = module
+            break
+
+    if not target_module:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Module introuvable"
+        )
+
+    # Récupérer la progression pour savoir si le module est complété
+    progression = await roadmap_service.get_user_progression(current_user.id, course_id)
+
+    is_completed = module_id in progression.get("completed_modules", []) if progression else False
+    current_module = progression.get("current_module") == module_id if progression else False
+
+    return {
+        "module": target_module,
+        "is_completed": is_completed,
+        "is_current": current_module,
+        "evaluation": progression.get("module_evaluations", {}).get(module_id) if progression else None
+    }
+
+
+@router.post("/courses/{course_id}/modules/{module_id}/start")
+async def start_module(
+    course_id: str,
+    module_id: str,
+    current_user: Utilisateur = Depends(get_current_user)
+):
+    """
+    Démarre un module (met à jour current_module dans la progression).
+    """
+    from src.profile.roadmap_services import roadmap_service
+
+    result = await roadmap_service.update_module_progress(
+        user_id=current_user.id,
+        course_id=course_id,
+        module_id=module_id,
+        time_spent_minutes=0
+    )
+
+    return {
+        "status": "success",
+        "message": f"Module {module_id} démarré",
+        "current_module": module_id
+    }
+
+
+@router.get("/statistics")
+async def get_learning_statistics(current_user: Utilisateur = Depends(get_current_user)):
+    """
+    Statistiques globales d'apprentissage de l'utilisateur (tous cours confondus).
+
+    Retourne:
+    - Nombre de cours suivis/complétés
+    - XP total gagné dans les cours
+    - Temps total passé
+    - Taux de complétion moyen
+    """
+    from src.profile.roadmap_services import roadmap_service
+
+    stats = await roadmap_service.get_user_statistics(current_user.id)
+
+    return {
+        "statistics": stats,
+        "user_id": str(current_user.id)
     }
 

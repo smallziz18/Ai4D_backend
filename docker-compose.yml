@@ -28,18 +28,6 @@ services:
     restart: unless-stopped
     command: redis-server --appendonly yes
 
-  ollama:
-    container_name: ollama
-    image: ollama/ollama
-    command: serve
-    ports:
-      - "11434:11434"
-    volumes:
-      - ./ollama:/root/.ollama
-    networks:
-      - mvp_network
-    restart: unless-stopped
-
   mongodb:
     image: mongodb/mongodb-community-server:6.0-ubi8
     container_name: mvp_mongodb

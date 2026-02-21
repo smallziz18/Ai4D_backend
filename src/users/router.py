@@ -188,6 +188,12 @@ async def get_all_users(
 
 
 # --- CREATE user ---
+@user_router.options("/signup")
+async def options_signup():
+    """Route OPTIONS pour gérer les requêtes preflight CORS"""
+    return {}
+
+
 @user_router.post("/signup", status_code=status.HTTP_201_CREATED)
 async def create_user(
         background_tasks: BackgroundTasks,
@@ -228,8 +234,33 @@ async def create_user(
         if existing_user:
             raise UserAlreadyExists()
 
-        # Revalider via le schéma pour conserver EmailStr
-        data = UtilisateurCreateBase(**{**data.model_dump(), "email": normalized_email})
+        # Normaliser le domaine (accepter majuscules et minuscules)
+        from src.users.models import Domaine as DomaineEnum
+        domaine_raw = getattr(data, 'domaine', None)
+
+        if domaine_raw:
+            domaine_raw_str = str(domaine_raw).strip()
+            domaine_found = None
+
+            # Chercher le domaine correspondant (insensible à la casse)
+            for dom in DomaineEnum:
+                # Comparer en minuscules pour être insensible à la casse
+                if (dom.value.lower() == domaine_raw_str.lower() or
+                    dom.name.lower() == domaine_raw_str.lower()):
+                    domaine_found = dom  # Utiliser l'enum directement
+                    break
+
+            # Si aucun domaine trouvé, utiliser GENERAL par défaut
+            if domaine_found is None:
+                domaine_found = DomaineEnum.GENERAL
+                logger.warning(f"Domaine '{domaine_raw_str}' non reconnu, utilisation de GENERAL")
+        else:
+            domaine_found = DomaineEnum.GENERAL
+
+        # Assigner l'enum (pas la valeur string)
+        data.domaine = domaine_found
+
+        logger.info(f"Domaine normalized: {domaine_raw} -> {domaine_found.value}")
 
         # ✅ Créer l'utilisateur de base
         user = await user_service.create_user(session, data)
@@ -290,6 +321,12 @@ async def create_user(
 
 
 # --- LOGIN user ---
+@user_router.options("/login")
+async def options_login():
+    """Route OPTIONS pour gérer les requêtes preflight CORS"""
+    return {}
+
+
 @user_router.post("/login")
 async def login_user(login: UserLogin, session: AsyncSession = Depends(get_session)):
     """
@@ -479,6 +516,9 @@ async def logout(token_detail: dict = Depends(AccessTokenBearer())):
 
 
 # --- PASSWORD RESET REQUEST ---
+
+
+
 @user_router.post("/password_reset_request")
 async def password_reset_request(
     email_model: PasswordResetModel,
@@ -552,6 +592,12 @@ async def password_reset_request(
 
 
 # --- PASSWORD RESET CONFIRM ---
+@user_router.options("/password_reset_confirm/{token}")
+async def options_password_reset_confirm():
+    """Route OPTIONS pour gérer les requêtes preflight CORS"""
+    return {}
+
+
 @user_router.post("/password_reset_confirm/{token}")
 async def password_reset_confirm(
     token: str,
@@ -626,6 +672,9 @@ async def password_reset_confirm(
 
 
 # --- RESEND VERIFICATION EMAIL ---
+
+
+
 @user_router.post("/resend_verification")
 async def resend_verification_email(
     email_model: EmailModel,

@@ -78,8 +78,8 @@ class UserService:
             data: Union[EtudiantCreate, ProfesseurCreate, UtilisateurCreateBase]
     ):
         """
-        Crée un utilisateur de base SANS profil Etudiant/Professeur.
-        Le profil détaillé est créé APRÈS le questionnaire.
+        Crée un utilisateur avec son profil Etudiant ou Professeur.
+        Le domaine est sauvegardé immédiatement lors de l'inscription.
         """
         try:
             # L'email est déjà normalisé dans router.py
@@ -92,7 +92,7 @@ class UserService:
             if await UserService.username_exists(data.username, session):
                 raise UserAlreadyExists()
 
-            # Créer UNIQUEMENT l'utilisateur de base
+            # Créer l'utilisateur de base
             utilisateur = Utilisateur(
                 nom=data.nom,
                 prenom=data.prenom,
@@ -104,6 +104,48 @@ class UserService:
                 updated_at=datetime.now()
             )
             session.add(utilisateur)
+            await session.flush()  # Obtenir l'ID de l'utilisateur
+
+            # Récupérer le domaine et le normaliser en enum
+            from src.users.models import Domaine as DomaineEnum
+
+            domaine_raw = getattr(data, 'domaine', 'Général') or 'Général'
+
+            # Convertir en enum si c'est une string
+            if isinstance(domaine_raw, str):
+                domaine_enum = DomaineEnum.GENERAL  # Default
+                for dom in DomaineEnum:
+                    if dom.value.lower() == domaine_raw.lower() or dom.name.lower() == domaine_raw.lower():
+                        domaine_enum = dom
+                        break
+            elif isinstance(domaine_raw, DomaineEnum):
+                domaine_enum = domaine_raw
+            else:
+                domaine_enum = DomaineEnum.GENERAL
+
+            # Créer le profil spécifique selon le statut
+            if data.status == StatutUtilisateur.ETUDIANT:
+                etudiant = Etudiant(
+                    id=utilisateur.id,
+                    domaine=domaine_enum,  # Utiliser l'enum
+                    niveau_technique=5,  # Valeur par défaut, sera mise à jour après questionnaire
+                    competences=[],
+                    objectifs_apprentissage=None,
+                    motivation=None,
+                    niveau_energie=5
+                )
+                session.add(etudiant)
+
+            elif data.status == StatutUtilisateur.PROFESSEUR:
+                professeur = Professeur(
+                    id=utilisateur.id,
+                    domaine=domaine_enum,  # Utiliser l'enum
+                    niveau_experience=1,  # Valeur par défaut
+                    specialites=[],
+                    motivation_principale=None,
+                    niveau_technologique=5
+                )
+                session.add(professeur)
 
             # Commit final
             await session.commit()
@@ -128,14 +170,14 @@ class UserService:
         session: Optional[AsyncSession] = None
     ) -> None:
         """
-        Crée le profil SQL (Etudiant/Professeur) s'il n'existe pas encore, après le questionnaire initial.
-        Les champs sont alimentés par l'analyse LLM si disponible (details), sinon valeurs par défaut sûres.
+        Met à jour le profil SQL (Etudiant/Professeur) avec les détails du questionnaire.
+        Le profil existe déjà (créé au signup), on ne fait que mettre à jour les valeurs.
         """
         from src.db.main import get_session
 
         close_session = False
         if session is None:
-            session = await get_session().__anext__()  # obtenir un AsyncSession
+            session = await get_session().__anext__()
             close_session = True
 
         try:
@@ -144,45 +186,36 @@ class UserService:
             if not user:
                 return
 
+            d = details or {}
+
             if status == StatutEnum.ETUDIANT:
-                # Profil étudiant
+                # Mettre à jour le profil étudiant avec les détails du questionnaire
                 stmt = select(Etudiant).where(Etudiant.id == user_id)
                 res = await session.execute(stmt)
                 etu = res.scalar_one_or_none()
+
                 if etu:
-                    return
-                d = details or {}
-                etu = Etudiant(
-                    id=user_id,
-                    niveau_technique=int(d.get("niveau", d.get("niveau_technique", 3)) or 3),
-                    competences=list(d.get("competences", [])) or [],
-                    objectifs_apprentissage=d.get("objectifs") or d.get("objectifs_apprentissage"),
-                    motivation=d.get("motivation"),
-                    niveau_energie=int(d.get("energie", d.get("niveau_energie", 5)) or 5),
-                )
-                session.add(etu)
-                await session.commit()
+                    # Mettre à jour avec les détails du questionnaire
+                    etu.niveau_technique = int(d.get("niveau", d.get("niveau_technique", etu.niveau_technique)) or etu.niveau_technique)
+                    etu.competences = list(d.get("competences", [])) or etu.competences
+                    etu.objectifs_apprentissage = d.get("objectifs") or d.get("objectifs_apprentissage") or etu.objectifs_apprentissage
+                    etu.motivation = d.get("motivation") or etu.motivation
+                    etu.niveau_energie = int(d.get("energie", d.get("niveau_energie", etu.niveau_energie)) or etu.niveau_energie)
+                    await session.commit()
 
             elif status == StatutEnum.PROFESSEUR:
-                # Profil professeur
+                # Mettre à jour le profil professeur
                 stmt = select(Professeur).where(Professeur.id == user_id)
                 res = await session.execute(stmt)
                 prof = res.scalar_one_or_none()
+
                 if prof:
-                    return
-                d = details or {}
-                prof = Professeur(
-                    id=user_id,
-                    niveau_experience=int(d.get("niveau_experience", 1) or 1),
-                    specialites=list(d.get("competences", d.get("specialites", [])) or []),
-                    motivation_principale=d.get("motivation_principale") or d.get("motivation"),
-                    niveau_technologique=int(d.get("niveau_technologique", d.get("energie", 5)) or 5),
-                )
-                session.add(prof)
-                await session.commit()
-            else:
-                # Autres statuts: ne rien faire
-                return
+                    # Mettre à jour avec les détails du questionnaire
+                    prof.niveau_experience = int(d.get("niveau_experience", prof.niveau_experience) or prof.niveau_experience)
+                    prof.specialites = list(d.get("competences", d.get("specialites", [])) or prof.specialites)
+                    prof.motivation_principale = d.get("motivation_principale") or d.get("motivation") or prof.motivation_principale
+                    prof.niveau_technologique = int(d.get("niveau_technologique", d.get("energie", prof.niveau_technologique)) or prof.niveau_technologique)
+                    await session.commit()
         finally:
             if close_session:
                 await session.close()

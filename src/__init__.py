@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from src.users.router import user_router
 from src.profile.router import router
 from src.profile.roadmap_router import roadmap_router
+from src.profile.roadmap_test_router import router as roadmap_test_router
 from .error import *
 from .middelware import register_middlewares
 from src.ai_agents.router import ai_router
@@ -22,6 +23,7 @@ register_middlewares(app)
 app.include_router(user_router, prefix=f"/api/auth/{version}", tags=["users"])
 app.include_router(router, prefix=f"/api/profile/{version}", tags=["profile"])
 app.include_router(roadmap_router, prefix=f"/api/profile/{version}", tags=["Roadmap"])
+app.include_router(roadmap_test_router, tags=["Roadmap Test"])  # Router de test pour Postman
 app.include_router(ai_router, prefix=f"/api/ai/{version}", tags=["AI Agents"])
 app.include_router(realtime_router, tags=["AI Realtime"])  # WebSocket - pas de version dans prefix
 

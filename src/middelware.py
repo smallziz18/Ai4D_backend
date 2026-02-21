@@ -30,8 +30,18 @@ PAUSE_ERROR_HANDLING = os.getenv("PAUSE_ERROR_HANDLING", "false").lower() in ("1
 
 
 def register_middlewares(app: FastAPI):
+    """
+    Enregistre les middlewares dans le bon ordre.
+    L'ordre CORRECT est: custom_logging → TrustedHost → CORS (exécution inverse)
+    """
+
+    # ============ MIDDLEWARE 1 (déclaré en 1er, exécuté en dernier - le plus "inner") ============
     @app.middleware("http")
     async def custom_logging(request: Request, call_next):
+        # Ignorer les OPTIONS - laisser les autres middlewares les gérer
+        if request.method == "OPTIONS":
+            return await call_next(request)
+
         start_time = time.time()
 
         try:
@@ -59,31 +69,42 @@ def register_middlewares(app: FastAPI):
         # Log final formaté
         logger.info(
             f"{request.method} {request.url.path} "
-            f"→ {response.status_code} | {duration}s | from {client_host} on port {client_port}"
+            f"→ {response.status_code} | {duration}s | from {client_host}:{client_port}"
         )
 
         return response
 
-    # Ajout des origines autorisées pour le frontend Nuxt
-    origins = [
-        "http://localhost:3000",  # Nuxt dev server
-        "http://127.0.0.1:3000",
-    ]
-
+    # ============ MIDDLEWARE 2 (déclaré en 2e, exécuté en 2e) ============
     trusted_hosts = [
         "localhost",
         "127.0.0.1",
+        "0.0.0.0",
     ]
-
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=origins,  # Origines autorisées
-        allow_credentials=True,  # Autoriser cookies / headers d'auth
-        allow_methods=["*"],  # Autoriser toutes les méthodes (GET, POST, etc.)
-        allow_headers=["*"],  # Autoriser tous les headers
-    )
 
     app.add_middleware(
         TrustedHostMiddleware,
         allowed_hosts=trusted_hosts,
     )
+
+    # ============ MIDDLEWARE 3 (ajouté en dernier, exécuté EN PREMIER - le plus "outer") ============
+    # ⚠️ IMPORTANT: CORS DOIT ÊTRE AJOUTÉ EN DERNIER POUR S'EXÉCUTER EN PREMIER
+    origins = [
+        "http://localhost:3000",     # Nuxt dev local
+        "http://127.0.0.1:3000",
+        "http://0.0.0.0:3000",
+        "http://localhost",
+        "http://127.0.0.1",
+        "http://0.0.0.0",
+        "*",                          # Autoriser tous en dev
+    ]
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
+        allow_headers=["*"],
+        expose_headers=["*"],
+        max_age=3600,
+    )
+

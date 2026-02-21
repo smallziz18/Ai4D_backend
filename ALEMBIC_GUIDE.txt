@@ -1,0 +1,44 @@
+SOLUTION FINALE - CORRECTION DU DOMAINE
+
+ÉTAPE 1: Exécuter le fichier SQL
+
+Option A - Via psql directement:
+  psql -U mvp_user -d mvp_db -f fix_domaine.sql
+
+Option B - Depuis psql interactif:
+  psql -U mvp_user -d mvp_db
+  \i fix_domaine.sql
+
+ÉTAPE 2: Redémarrer le serveur
+
+ÉTAPE 3: Tester le signup avec domaine="Chimie"
+
+---
+
+CE QUE LE SCRIPT FAIT:
+1. Nettoie les références Alembic cassées
+2. Supprime les anciennes colonnes domaine
+3. Supprime l'ancien type enum
+4. Crée le nouveau type enum avec: Chimie, Droit, Informatique, etc.
+5. Ajoute les colonnes à etudiant et professeur
+6. Vérifie que tout est OK
+
+RÉSULTAT ATTENDU:
+✅ Signup avec "Chimie" → BD reçoit "Chimie"
+✅ Le domaine est sauvegardé correctement
+
+RÉSULTAT ATTENDU:
+✅ L'enum PostgreSQL contiendra: 'Chimie', 'Droit', 'Marketing', etc. (valeurs normales)
+✅ Le code normalise automatiquement n'importe quel format vers la bonne valeur
+✅ Le signup fonctionnera correctement
+
+FICHIERS MODIFIÉS:
+- migrations/versions/fix_domaine_enum.py (NOUVEAU - recréer l'enum)
+- src/users/router.py (normalisation du domaine)
+- src/users/schema.py (domaine comme string)
+- src/users/services.py (récupération simple du domaine)
+
+SI ERREUR:
+Le problème est que l'enum existe déjà avec de mauvaises valeurs.
+La migration fix_domaine_enum le supprime et le recrée correctement.
+

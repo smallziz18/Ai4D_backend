@@ -115,6 +115,61 @@ async def get_current_user(
     except (UserNotFound, InvalidToken, RevokedToken, EmailNotVerified):
         raise
     except Exception as e:
+        logger.error(f"Unexpected error in get_current_user: {e}")
+        raise InvalidToken()
+
+
+async def get_current_user_id(
+    token_details: dict = Depends(AccessTokenBearer()),
+    session: AsyncSession = Depends(get_session)
+):
+    """
+    Récupère uniquement l'ID de l'utilisateur depuis le token.
+    Version allégée de get_current_user pour les endpoints qui n'ont besoin que de l'ID.
+    """
+    from uuid import UUID
+    try:
+        user_data = token_details.get("user")
+        if isinstance(user_data, dict) and "user" in user_data:
+            user_data = user_data["user"]
+        if not user_data or not isinstance(user_data, dict):
+            raise InvalidToken()
+
+        # Essayer de récupérer l'ID directement
+        user_id = user_data.get("id")
+        if user_id:
+            return UUID(str(user_id))
+
+        # Fallback: récupérer via l'email
+        user_email = user_data.get("email") or user_data.get("username") or token_details.get("sub")
+        if not user_email:
+            raise InvalidToken()
+
+        # Requête DB pour récupérer l'ID
+        user = await users_service.get_user_by_email(user_email, session=session)
+        if not user:
+            raise UserNotFound()
+
+        return user.id
+    except Exception as e:
+        logger.error(f"Error getting current user ID: {e}")
+        raise InvalidToken()
+        data = UtilisateurRead.model_validate(user, from_attributes=True)
+        if user.status == "Etudiant" and user.etudiant:
+            data.niveau_technique = user.etudiant.niveau_technique
+            data.competences = user.etudiant.competences
+            data.objectifs_apprentissage = user.etudiant.objectifs_apprentissage
+            data.motivation = user.etudiant.motivation
+            data.niveau_energie = user.etudiant.niveau_energie
+        elif user.status == "Professeur" and user.professeur:
+            data.niveau_experience = user.professeur.niveau_experience
+            data.specialites = user.professeur.specialites
+            data.motivation_principale = user.professeur.motivation_principale
+            data.niveau_technologique = user.professeur.niveau_technologique
+        return data
+    except (UserNotFound, InvalidToken, RevokedToken, EmailNotVerified):
+        raise
+    except Exception as e:
         logger.error(f"Erreur inattendue dans get_current_user: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

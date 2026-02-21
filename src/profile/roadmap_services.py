@@ -6,18 +6,17 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta, UTC
 from uuid import UUID
 import logging
+import os
 
-from motor.motor_asyncio import AsyncIOMotorDatabase
-from pymongo import ReturnDocument
-from bson import ObjectId
+from motor.motor_asyncio import AsyncIOMotorDatabase, AsyncIOMotorClient
 
-from src.db.mongo_db import get_mongo_db
+
+from src.config import Config
 from src.profile.mongo_models import (
-    CourseMongoDB,
-    UserProgressionMongoDB,
     ProfilMongoDB
 )
 from src.ai_agents.agents.course_recommendation_agent import course_recommendation_agent
+from src.ai_agents.mcp.web_search_mcp import web_search_mcp
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +25,16 @@ class RoadmapService:
     """Service de gestion des roadmaps personnalisées"""
 
     def __init__(self):
-        self.db: AsyncIOMotorDatabase = get_mongo_db()
+        # Créer un client Motor dédié à la boucle courante pour éviter les erreurs de boucle croisée
+        self._client = AsyncIOMotorClient(
+            host=Config.MONGO_HOST if os.getenv('DOCKER_ENV', 'false').lower() == 'true' else 'localhost',
+            port=Config.MONGO_PORT,
+            username=Config.MONGO_APP_USERNAME,
+            password=Config.MONGO_APP_PASSWORD,
+            authSource=Config.MONGO_DATABASE,
+            serverSelectionTimeoutMS=5000,
+        )
+        self.db: AsyncIOMotorDatabase = self._client[Config.MONGO_DATABASE]
         self.courses_collection = self.db["courses"]
         self.progressions_collection = self.db["user_progressions"]
         self.profiles_collection = self.db["profils"]
@@ -92,8 +100,8 @@ class RoadmapService:
                 duration_weeks=duration_weeks
             )
 
-            # Créer l'objet cours
-            course_data = self._prepare_course_data(roadmap, profil, duration_weeks)
+            # Créer l'objet cours avec enrichissement de ressources
+            course_data = await self._prepare_course_data(roadmap, profil, duration_weeks)
 
             # Convertir tous les UUID en strings récursivement
             course_data = self._convert_uuids_to_strings(course_data)
@@ -163,7 +171,175 @@ class RoadmapService:
             return f"\n\n⚠️ PRIORITÉS (faiblesses identifiées) : {', '.join(weaknesses[:5])}"
         return ""
 
-    def _prepare_course_data(
+    async def _enrich_module_with_resources(
+        self,
+        module: Dict[str, Any],
+        profil: ProfilMongoDB
+    ) -> Dict[str, Any]:
+        """
+        Enrichir un module avec de vraies ressources trouvées via le MCP.
+
+        Args:
+            module: Module à enrichir
+            profil: Profil utilisateur pour personnalisation
+
+        Returns:
+            Module enrichi avec ressources
+        """
+        try:
+            # Extraire le sujet du module
+            topic = module.get("titre", "machine learning")
+
+            # Déterminer la langue préférée (français par défaut)
+            language = "fr"
+
+            # Rechercher des ressources complètes
+            resources = await web_search_mcp.get_comprehensive_resources(
+                topic=topic,
+                user_level=profil.niveau,
+                language=language,
+                include_projects=True
+            )
+
+            # Si le module a déjà des leçons, les enrichir
+            if module.get("lessons"):
+                # Enrichir chaque leçon existante
+                for lesson in module["lessons"]:
+                    if not lesson.get("ressources") or len(lesson["ressources"]) == 0:
+                        # Ajouter des ressources basées sur le type de leçon
+                        lesson_type = lesson.get("type", "video")
+                        if lesson_type == "video" and resources.get("videos"):
+                            lesson["ressources"] = resources["videos"][:2]
+                        elif lesson_type == "cours" and resources.get("cours"):
+                            lesson["ressources"] = resources["cours"][:2]
+                        elif lesson_type == "code" and resources.get("projets"):
+                            lesson["ressources"] = resources["projets"][:2]
+                        else:
+                            # Mélanger les types
+                            all_resources = (
+                                resources.get("videos", [])[:1] +
+                                resources.get("articles", [])[:1]
+                            )
+                            lesson["ressources"] = all_resources
+
+                    # Ajouter XP si manquant
+                    if not lesson.get("xp"):
+                        lesson["xp"] = 50 + (profil.niveau * 10)
+
+                return module
+
+            # Si pas de leçons, créer des leçons basées sur les ressources trouvées
+            lessons = []
+            lesson_id_base = module.get("id", "module_1")
+
+            # Créer des leçons à partir des vidéos
+            for i, video in enumerate(resources.get("videos", [])[:2], start=1):
+                lessons.append({
+                    "id": f"lesson_{lesson_id_base}_{len(lessons)+1}",
+                    "titre": video["titre"],
+                    "type": "video",
+                    "url": video.get("url", ""),
+                    "duree_estimee": video.get("duree_estimee", "30min"),
+                    "ordre": len(lessons) + 1,
+                    "xp": 50 + (profil.niveau * 5),
+                    "ressources": [video],
+                    "completed": False
+                })
+
+            # Ajouter un cours si disponible
+            if resources.get("cours"):
+                cours = resources["cours"][0]
+                lessons.append({
+                    "id": f"lesson_{lesson_id_base}_{len(lessons)+1}",
+                    "titre": cours["titre"],
+                    "type": "cours",
+                    "url": cours.get("url", ""),
+                    "duree_estimee": cours.get("duree_estimee", "2h"),
+                    "ordre": len(lessons) + 1,
+                    "xp": 100 + (profil.niveau * 10),
+                    "ressources": [cours],
+                    "completed": False
+                })
+
+            # Ajouter un projet si disponible et niveau suffisant
+            if resources.get("projets") and profil.niveau >= 3:
+                projet = resources["projets"][0]
+                lessons.append({
+                    "id": f"lesson_{lesson_id_base}_{len(lessons)+1}",
+                    "titre": f"Projet pratique : {projet['titre']}",
+                    "type": "code",
+                    "url": projet.get("url", ""),
+                    "duree_estimee": projet.get("duree_estimee", "2h"),
+                    "ordre": len(lessons) + 1,
+                    "xp": 150 + (profil.niveau * 15),
+                    "ressources": [projet],
+                    "completed": False
+                })
+
+            # Si toujours pas de leçons, ajouter des ressources par défaut
+            if not lessons:
+                lessons = self._get_default_lessons(lesson_id_base, profil)
+
+            module["lessons"] = lessons
+            return module
+
+        except Exception as e:
+            logger.error(f"Erreur enrichissement module: {e}")
+            # Fallback sur leçons par défaut
+            module["lessons"] = self._get_default_lessons(
+                module.get("id", "module_1"),
+                profil
+            )
+            return module
+
+    def _get_default_lessons(self, module_id: str, profil: ProfilMongoDB) -> List[Dict[str, Any]]:
+        """Créer des leçons par défaut si la recherche échoue."""
+        default_resources = [
+            {
+                "titre": "Introduction au Machine Learning",
+                "type": "video",
+                "url": "https://www.youtube.com/watch?v=Gv9_4yMHFhI",
+                "duree_estimee": "30min",
+                "xp": 50 + (profil.niveau * 5),
+                "auteur": "Machine Learnia",
+                "plateforme": "YouTube"
+            },
+            {
+                "titre": "Cours Deep Learning - Andrew Ng",
+                "type": "cours",
+                "url": "https://www.coursera.org/specializations/deep-learning",
+                "duree_estimee": "2h",
+                "xp": 100 + (profil.niveau * 10),
+                "auteur": "deeplearning.ai",
+                "plateforme": "Coursera"
+            },
+            {
+                "titre": "Projet pratique Kaggle",
+                "type": "code",
+                "url": "https://www.kaggle.com/learn",
+                "duree_estimee": "1h30",
+                "xp": 150 + (profil.niveau * 15),
+                "auteur": "Kaggle",
+                "plateforme": "Kaggle"
+            }
+        ]
+
+        lessons = []
+        for i, res in enumerate(default_resources, start=1):
+            lessons.append({
+                "id": f"lesson_{module_id}_{i}",
+                "titre": res["titre"],
+                "type": res["type"],
+                "url": res["url"],
+                "duree_estimee": res["duree_estimee"],
+                "ordre": i,
+                "xp": res["xp"],
+                "ressources": [res],
+                "completed": False
+            })
+        return lessons
+
+    async def _prepare_course_data(
         self,
         roadmap: Dict[str, Any],
         profil: ProfilMongoDB,
@@ -193,12 +369,19 @@ class RoadmapService:
                 "lessons": []
             }]
 
-        # S'assurer que chaque module a un ID
+        # S'assurer que chaque module a un ID et enrichir avec vraies ressources
+        enriched_modules = []
         for i, module in enumerate(modules):
             if not module.get("id"):
                 module["id"] = f"module_{i+1}"
             if not module.get("ordre"):
                 module["ordre"] = i + 1
+
+            # Enrichir le module avec de vraies ressources via MCP
+            enriched_module = await self._enrich_module_with_resources(module, profil)
+            enriched_modules.append(enriched_module)
+
+        modules = enriched_modules
 
         return {
             "course_id": course_id,
@@ -223,14 +406,19 @@ class RoadmapService:
 
     def _get_niveau_label(self, niveau: int) -> str:
         """Convertir niveau numérique en label"""
-        if niveau <= 3:
-            return "Débutant"
-        elif niveau <= 6:
-            return "Intermédiaire"
-        elif niveau <= 8:
-            return "Avancé"
-        else:
-            return "Expert"
+        labels = {
+            1: "Novice",
+            2: "Débutant",
+            3: "Apprenti",
+            4: "Initié",
+            5: "Intermédiaire",
+            6: "Confirmé",
+            7: "Avancé",
+            8: "Expert",
+            9: "Maître",
+            10: "Grand Maître"
+        }
+        return labels.get(niveau, "Débutant")
 
     async def _create_initial_progression(
         self,
