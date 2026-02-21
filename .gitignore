@@ -5,6 +5,12 @@ __pycache__/
 
 # C extensions
 *.so
+ARCHITECTURE_UML.md
+IMPLEMENTATION.md
+FAQ_TECHNICAL.md
+MEMOIR_PLAN.md
+README_MEMOIR.md
+DOCUMENTATION_INDEX.md
 
 # Distribution / packaging
 .Python

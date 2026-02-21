@@ -1,22 +1,24 @@
 # AI4D — Backend for Adaptive AI Learning Platform 🚀
 
+**Master's Thesis Implementation - Adaptive Learning System for AI Education**
+
 [![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)](CHANGELOG.md)
 [![Tests](https://img.shields.io/badge/tests-6%2F6%20passing-success.svg)](test_corrections.py)
 [![Python](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-proprietary-red.svg)](LICENSE)
 
-This repository contains the backend code for AI4D, a **personalized, gamified learning platform** focused on AI and data engineering. It provides intelligent question generation, adaptive user profiling, automated roadmap generation with **real educational resources**, and comprehensive assessment handling using LLMs.
+Ce dépôt contient l'implémentation backend pour **AI4D**, une plateforme d'apprentissage personnalisée et gamifiée dédiée à l'IA et l'ingénierie des données. Le système offre une génération intelligente de questions, un profilage utilisateur adaptatif, la génération automatique de parcours d'apprentissage avec **ressources éducatives réelles**, et une gestion complète des évaluations utilisant des LLM.
 
-## 🎉 What's New in v2.0.0
+## 🎉 Nouveautés v2.0.0
 
-- ✨ **MCP (Model Context Protocol)** for automatic resource search (YouTube, Coursera, edX, etc.)
-- 🎯 **Smart Level Detection** - Sophisticated algorithm detecting real user level (1-10)
-- 🗺️ **Auto-Enriched Roadmaps** - Modules filled with curated videos, courses, and projects
-- 🔧 **Event Loop Fixes** - Proper async/await handling in Celery tasks
-- 📝 **Postman Test Suite** - 12 pre-configured requests for easy testing
-- 📚 **Complete Documentation** - RESUME_FINAL.md, POSTMAN_GUIDE.md, and more
+- ✨ **MCP (Model Context Protocol)** - Recherche automatique de ressources (YouTube, Coursera, edX, etc.)
+- 🎯 **Détection Intelligente de Niveau** - Algorithme sophistiqué détectant le vrai niveau utilisateur (1-10)
+- 🗺️ **Parcours Enrichis Automatiquement** - Modules remplis de vidéos, cours et projets curés
+- 🔧 **Gestion Correcte des Event Loops** - Handling async/await correct dans les tâches Celery
+- 📝 **Suite de Tests Postman** - 12 requêtes préconfigurées pour tests faciles
+- 📚 **Documentation Complète** - RESUME_FINAL.md, POSTMAN_GUIDE.md, et plus
 
-[See full CHANGELOG →](CHANGELOG.md)
+[Voir le CHANGELOG complet →](CHANGELOG.md)
 
 ## Table of contents
 
